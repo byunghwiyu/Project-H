@@ -1,0 +1,3 @@
+﻿# setupId: battle setup id, enemyLocationId: location_waves key, enemyWaveIndex: wave index, turnIntervalSec: turn tick interval, ally/enemy start and spacing: spawn layout positions
+setupId,enemyLocationId,enemyWaveIndex,turnIntervalSec,allyStartX,allyStartY,allySpacingX,enemyStartX,enemyStartY,enemySpacingX
+default,SITE_ALPHA,1,0.75,-4.5,0.4,1.7,2.8,0.4,1.7

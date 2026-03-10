@@ -1,0 +1,7 @@
+﻿# poolId: recruit pool id, templateId: recruitable character template id, weight: roll weight, offerCount: number of offers shown when this pool is used
+poolId,templateId,weight,offerCount
+default,CHAR_chelsu,45,3
+default,CHAR_sehee,40,3
+default,CHAR_sera,12,3
+default,CHAR_hong,12,3
+default,CHAR_lee,12,3

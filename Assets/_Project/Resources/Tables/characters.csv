@@ -1,0 +1,7 @@
+﻿# templateId: character template id, name: display name, grade: rarity tier, roleTag: role, baseStat: base power stat, recruitCostCredits: recruit cost, recruitWeight: offer roll weight, traitLine: flavor trait text, imageUrl: character illustration path/url
+templateId,name,grade,roleTag,baseStat,recruitCostCredits,recruitWeight,traitLine,imageUrl
+CHAR_chelsu,김철수,1,tank,42,180,45,항상 전방에서 적을 받아내는 강인한 전사,char_chelsu
+CHAR_sehee,조세희,1,dps,47,200,40,양궁 국가대표 출신의 매서운 저격수,char_sehee
+CHAR_sera,미즈하라 세나,2,support,58,380,12,기도하는 소녀,char_sera
+CHAR_hong,홍련,2,support,58,380,12,적염 홍가의 후계자,char_hong
+CHAR_lee,이세리,2,support,58,380,12,도봉산에서 수련하던 신선 지망생,char_lee

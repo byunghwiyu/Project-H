@@ -1,0 +1,46 @@
+﻿{
+  "allies": [
+    {
+      "templateId": "hongryeon",
+      "displayName": "홍련",
+      "maxHp": 60,
+      "attack": 8,
+      "agility": 14,
+      "prefabResourcePath": "Prefabs/Units/Hongryeon",
+      "spawnX": -4.5,
+      "spawnY": 0.4
+    },
+    {
+      "templateId": "iseri",
+      "displayName": "이세리",
+      "maxHp": 52,
+      "attack": 7,
+      "agility": 11,
+      "prefabResourcePath": "Prefabs/Units/Iseri",
+      "spawnX": -2.8,
+      "spawnY": -0.2
+    }
+  ],
+  "enemies": [
+    {
+      "templateId": "bandit_a",
+      "displayName": "대나무 숲 도적 A",
+      "maxHp": 38,
+      "attack": 6,
+      "agility": 9,
+      "prefabResourcePath": "Prefabs/Units/BanditA",
+      "spawnX": 2.8,
+      "spawnY": 0.4
+    },
+    {
+      "templateId": "bandit_b",
+      "displayName": "대나무 숲 도적 B",
+      "maxHp": 42,
+      "attack": 6,
+      "agility": 10,
+      "prefabResourcePath": "Prefabs/Units/BanditB",
+      "spawnX": 4.5,
+      "spawnY": -0.2
+    }
+  ]
+}
