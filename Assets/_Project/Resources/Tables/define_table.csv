@@ -10,3 +10,4 @@ logKeepCount,30,기록 저장 제한 수
 maxPartySize,4,전장 투입 가능 인원
 teamSlotCount,4,팀 편성 창의 슬롯 개수
 talentAssignChance,0.35,유닛 고용 시 재능 할당률
+startingCredits,500,신규 플레이어 초기 지급 크레딧

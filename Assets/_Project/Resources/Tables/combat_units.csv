@@ -5,6 +5,10 @@ MERC_TEMPLATE,CHAR_sehee,Assault Striker,ranged,magic,155,100,32,38,18,40,36,18,
 MERC_TEMPLATE,CHAR_sera,Field Captain,ranged,physical,165,110,35,30,40,22,28,20,0.1,0.12,1.65,0.04,0.05,6,0,2,1.1,1.25,char_sera,,
 MERC_TEMPLATE,CHAR_hong,Legend Foreman,melee,physical,230,120,55,32,30,46,44,30,0.1,0.22,1.9,0.12,0.12,10,4,4,1.2,1.1,char_hong,CHAR_hong,Prefabs/Units/Hongryeon
 MERC_TEMPLATE,CHAR_lee,Legend Foreman,melee,physical,230,120,55,32,30,46,44,30,0.1,0.22,1.9,0.12,0.12,10,4,4,1.2,1.1,char_lee,CHAR_lee,Prefabs/Units/Iseri
+MERC_TEMPLATE,CHAR_chelsu_2A,철수(중장),melee,physical,230,120,58,28,22,40,36,36,0.08,0.10,1.65,0.05,0.14,12,5,0,1.2,1,char_chelsu,,
+MERC_TEMPLATE,CHAR_chelsu_2B,철수(돌격),melee,physical,210,110,50,32,20,44,42,28,0.10,0.15,1.80,0.08,0.10,8,3,0,1.2,1,char_chelsu,,
+MERC_TEMPLATE,CHAR_sehee_2A,세희(명사수),ranged,physical,190,110,38,40,24,46,44,22,0.13,0.19,1.85,0.09,0.06,6,1,0,1.2,1,char_sehee,,
+MERC_TEMPLATE,CHAR_sehee_2B,세희(저격수),ranged,physical,175,110,33,44,22,44,50,16,0.15,0.22,2.05,0.11,0.04,4,0,0,1.2,1,char_sehee,,
 MONSTER_TEMPLATE,MON_WOLF,Dire Wolf,melee,physical,12,40,8,10,4,8,4,1,0,0,1.2,0,0,0,0,0,1,0,/assets/illustrations/monsters/mon_wolf.svg,,Prefabs/Units/BanditA
 MONSTER_TEMPLATE,MON_GOBLIN,Goblin Raider,melee,physical,105,100,22,32,12,30,26,14,0.1,0.1,1.55,0,0,2,0,0,1,0,/assets/illustrations/monsters/mon_goblin.svg,,Prefabs/Units/BanditA
 MONSTER_TEMPLATE,MON_SLIME,Arc Slime,ranged,magic,120,100,20,24,28,10,20,16,0.05,0.08,1.5,0,0,4,0,2,1,0,/assets/illustrations/monsters/mon_slime.svg,,Prefabs/Units/BanditB

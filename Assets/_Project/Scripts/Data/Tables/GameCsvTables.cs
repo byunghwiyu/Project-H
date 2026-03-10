@@ -139,6 +139,61 @@ namespace ProjectH.Data.Tables
         public bool IsOpen { get; }
     }
 
+    public readonly struct CharacterRow
+    {
+        public CharacterRow(
+            string templateId,
+            string name,
+            int grade,
+            string roleTag,
+            string promotionRouteA,
+            string promotionRouteB)
+        {
+            TemplateId = templateId;
+            Name = name;
+            Grade = grade;
+            RoleTag = roleTag;
+            PromotionRouteA = promotionRouteA;
+            PromotionRouteB = promotionRouteB;
+        }
+
+        public string TemplateId { get; }
+        public string Name { get; }
+        public int Grade { get; }
+        public string RoleTag { get; }
+        public string PromotionRouteA { get; }
+        public string PromotionRouteB { get; }
+    }
+
+    public readonly struct PromotionRuleRow
+    {
+        public PromotionRuleRow(
+            int gradeFrom,
+            int gradeTo,
+            int requiredLevel,
+            int timeSeconds,
+            int costCredits,
+            string route,
+            float multiplierBonus)
+        {
+            GradeFrom = gradeFrom;
+            GradeTo = gradeTo;
+            RequiredLevel = requiredLevel;
+            TimeSeconds = timeSeconds;
+            CostCredits = costCredits;
+            Route = route;
+            MultiplierBonus = multiplierBonus;
+        }
+
+        public int GradeFrom { get; }
+        public int GradeTo { get; }
+        public int RequiredLevel { get; }
+        public int TimeSeconds { get; }
+        public int CostCredits { get; }
+        public string Route { get; }
+        public float MultiplierBonus { get; }
+    }
+
     public readonly struct LevelCurveRow
     {
         public LevelCurveRow(int level, int expToNext, float statMultiplier)
@@ -256,6 +311,9 @@ namespace ProjectH.Data.Tables
         private readonly Dictionary<string, List<DropRow>> dropsByTemplateId;
         private readonly Dictionary<int, LevelCurveRow> levelCurveByLevel;
         private readonly int maxLevel;
+        private readonly Dictionary<string, CharacterRow> characterRowsById;
+        // Key: "gradeFrom::route" e.g. "1::A"
+        private readonly Dictionary<string, PromotionRuleRow> promotionRulesByKey;
 
         private GameCsvTables(
             Dictionary<string, CombatUnitRow> combatUnitsById,
@@ -269,7 +327,9 @@ namespace ProjectH.Data.Tables
             Dictionary<string, StageRuleRow> stageRulesById,
             Dictionary<string, List<EncounterRow>> encountersByKey,
             Dictionary<string, List<DropRow>> dropsByTemplateId,
-            Dictionary<int, LevelCurveRow> levelCurveByLevel)
+            Dictionary<int, LevelCurveRow> levelCurveByLevel,
+            Dictionary<string, CharacterRow> characterRowsById,
+            Dictionary<string, PromotionRuleRow> promotionRulesByKey)
         {
             this.combatUnitsById = combatUnitsById;
             this.battleSetupsById = battleSetupsById;
@@ -284,6 +344,8 @@ namespace ProjectH.Data.Tables
             this.dropsByTemplateId = dropsByTemplateId;
             this.levelCurveByLevel = levelCurveByLevel;
             maxLevel = levelCurveByLevel.Count > 0 ? levelCurveByLevel.Keys.Max() : 1;
+            this.characterRowsById = characterRowsById;
+            this.promotionRulesByKey = promotionRulesByKey;
         }
 
         public static bool TryLoad(out GameCsvTables tables, out string error)
@@ -377,7 +439,19 @@ namespace ProjectH.Data.Tables
                 return false;
             }
 
-            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId, levelCurveByLevel);
+            var characterRowsById = BuildCharacters(loadedTables["characters"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            var promotionRulesByKey = BuildPromotionRules(loadedTables["promotion_rules"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId, levelCurveByLevel, characterRowsById, promotionRulesByKey);
             return true;
         }
 
@@ -426,6 +500,18 @@ namespace ProjectH.Data.Tables
             return skillsByOwnerId.TryGetValue(ownerId.Trim(), out var list)
                 ? list
                 : System.Array.Empty<SkillDefinition>();
+        }
+
+        public bool TryGetCharacterRow(string templateId, out CharacterRow row)
+        {
+            return characterRowsById.TryGetValue(templateId ?? string.Empty, out row);
+        }
+
+        /// <summary>route: "A" 또는 "B"</summary>
+        public bool TryGetPromotionRule(int gradeFrom, string route, out PromotionRuleRow row)
+        {
+            var key = $"{gradeFrom}::{(route ?? string.Empty).ToUpperInvariant()}";
+            return promotionRulesByKey.TryGetValue(key, out row);
         }
 
         public int GetMaxLevel() => maxLevel;
@@ -809,6 +895,58 @@ namespace ProjectH.Data.Tables
                 }
 
                 list.Add(new SkillDefinition(ownerId, skillId, skillName, kind, effectType, value1));
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, CharacterRow> BuildCharacters(CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, CharacterRow>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var templateId       = Get(r, "templateId");
+                var name             = Get(r, "name");
+                var grade            = ParseInt(Get(r, "grade"));
+                var roleTag          = Get(r, "roleTag");
+                var promotionRouteA  = Get(r, "promotionRouteA");
+                var promotionRouteB  = Get(r, "promotionRouteB");
+
+                if (string.IsNullOrWhiteSpace(templateId))
+                {
+                    continue;
+                }
+
+                map[templateId] = new CharacterRow(templateId, name, grade, roleTag, promotionRouteA, promotionRouteB);
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, PromotionRuleRow> BuildPromotionRules(CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, PromotionRuleRow>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var gradeFrom       = ParseInt(Get(r, "gradeFrom"));
+                var gradeTo         = ParseInt(Get(r, "gradeTo"));
+                var requiredLevel   = ParseInt(Get(r, "requiredLevel"));
+                var timeSeconds     = ParseInt(Get(r, "timeSeconds"));
+                var costCredits     = ParseInt(Get(r, "costCredits"));
+                var route           = Get(r, "route").ToUpperInvariant();
+                var multiplierBonus = ParseFloat(Get(r, "multiplierBonus"));
+
+                if (gradeFrom <= 0 || string.IsNullOrWhiteSpace(route))
+                {
+                    continue;
+                }
+
+                var key = $"{gradeFrom}::{route}";
+                map[key] = new PromotionRuleRow(gradeFrom, gradeTo, requiredLevel, timeSeconds, costCredits, route, multiplierBonus);
             }
 
             return map;
