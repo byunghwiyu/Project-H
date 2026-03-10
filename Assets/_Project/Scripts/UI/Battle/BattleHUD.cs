@@ -66,6 +66,12 @@ namespace ProjectH.UI.Battle
             }
         }
 
+        /// <summary>시스템 메시지를 전투 로그에 추가합니다.</summary>
+        public void LogMessage(string richText)
+        {
+            AddLog(richText);
+        }
+
         /// <summary>전투 패배 시 호출. 패배 오버레이를 표시합니다.</summary>
         public void ShowGameOver(Action onReturn)
         {

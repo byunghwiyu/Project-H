@@ -130,6 +130,7 @@ namespace ProjectH.Core
                     var killed = roster.ExtractKilledEnemies();
                     CleanupEnemyViews(killed);
                     ResolveAndLogDrops(killed);
+                    DistributeExp(killed);
                     SpawnNextWave();
                 }
             }
@@ -183,10 +184,23 @@ namespace ProjectH.Core
                 return false;
             }
 
-            return TryBuildDefinitionsFromIds(
-                tables, allyIds, BattleTeam.Ally,
-                setup.AllyStartX, setup.AllyStartY, setup.AllySpacingX,
-                out allyDefs, out error);
+            if (!TryBuildDefinitionsFromIds(
+                    tables, allyIds, BattleTeam.Ally,
+                    setup.AllyStartX, setup.AllyStartY, setup.AllySpacingX,
+                    out allyDefs, out error))
+            {
+                return false;
+            }
+
+            // 레벨에 따른 스탯 배율 적용
+            for (var i = 0; i < allyDefs.Length; i++)
+            {
+                var level = PlayerAccountService.GetLevel(allyDefs[i].templateId);
+                var mult = tables.GetLevelStatMultiplier(level);
+                allyDefs[i] = ApplyLevelMultiplier(allyDefs[i], mult);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -271,6 +285,82 @@ namespace ProjectH.Core
             {
                 Debug.Log($"[wave] Drops: {string.Join(", ", dropped)}");
             }
+        }
+
+        /// <summary>
+        /// 사망한 적의 ExpGain을 합산하여 생존 아군에게 균등 분배합니다.
+        /// 레벨업 발생 시 HUD 로그에 출력합니다.
+        /// </summary>
+        private void DistributeExp(List<(string runtimeId, string templateId)> killed)
+        {
+            var totalExp = 0f;
+            foreach (var (_, templateId) in killed)
+            {
+                if (tables.TryGetCombatUnit(templateId, out var row))
+                {
+                    totalExp += row.ExpGain;
+                }
+            }
+
+            if (totalExp <= 0f)
+            {
+                return;
+            }
+
+            var aliveAllies = roster.Allies.Where(u => u.IsAlive).ToList();
+            if (aliveAllies.Count == 0)
+            {
+                return;
+            }
+
+            var expPerAlly = Mathf.Max(1, Mathf.RoundToInt(totalExp / aliveAllies.Count));
+
+            foreach (var ally in aliveAllies)
+            {
+                var levelUps = PlayerAccountService.AddExp(ally.TemplateId, expPerAlly, tables);
+                Debug.Log($"[exp] {ally.TemplateId} +{expPerAlly} EXP (Lv.{PlayerAccountService.GetLevel(ally.TemplateId)} / {PlayerAccountService.GetExp(ally.TemplateId)} exp)");
+
+                foreach (var (oldLv, newLv) in levelUps)
+                {
+                    Debug.Log($"[levelup] {ally.TemplateId} Lv.{oldLv} → Lv.{newLv}");
+                    hud?.LogMessage($"<color=#FFD700>★ {ally.TemplateId} Lv.{newLv} 레벨업!</color>");
+                }
+            }
+        }
+
+        /// <summary>레벨 multiplier를 BattleUnitDefinition의 정수형 스탯에 적용합니다.</summary>
+        private static BattleUnitDefinition ApplyLevelMultiplier(BattleUnitDefinition def, float mult)
+        {
+            if (Mathf.Approximately(mult, 1f))
+            {
+                return def;
+            }
+
+            var s = def.statBlock;
+            def.statBlock = new BattleStatBlock
+            {
+                MaxHp          = Mathf.Max(1, Mathf.RoundToInt(s.MaxHp * mult)),
+                MaxMana        = Mathf.Max(0, Mathf.RoundToInt(s.MaxMana * mult)),
+                Stamina        = Mathf.RoundToInt(s.Stamina * mult),
+                Agility        = s.Agility,
+                Intelligence   = Mathf.RoundToInt(s.Intelligence * mult),
+                Strength       = Mathf.RoundToInt(s.Strength * mult),
+                Attack         = Mathf.Max(1, Mathf.RoundToInt(s.Attack * mult)),
+                Defense        = Mathf.RoundToInt(s.Defense * mult),
+                HpRegen        = Mathf.RoundToInt(s.HpRegen * mult),
+                ThornPhysical  = Mathf.RoundToInt(s.ThornPhysical * mult),
+                ThornMagical   = Mathf.RoundToInt(s.ThornMagical * mult),
+                Evasion        = s.Evasion,
+                CritChance     = s.CritChance,
+                CritDamage     = s.CritDamage,
+                LifeSteal      = s.LifeSteal,
+                Counter        = s.Counter,
+                ExpGain        = s.ExpGain,
+                HealPower      = s.HealPower,
+                AttackRangeType = s.AttackRangeType,
+                DamageType     = s.DamageType,
+            };
+            return def;
         }
 
         /// <summary>

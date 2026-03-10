@@ -139,6 +139,20 @@ namespace ProjectH.Data.Tables
         public bool IsOpen { get; }
     }
 
+    public readonly struct LevelCurveRow
+    {
+        public LevelCurveRow(int level, int expToNext, float statMultiplier)
+        {
+            Level = level;
+            ExpToNext = expToNext;
+            StatMultiplier = statMultiplier;
+        }
+
+        public int Level { get; }
+        public int ExpToNext { get; }
+        public float StatMultiplier { get; }
+    }
+
     public readonly struct StageRuleRow
     {
         public StageRuleRow(
@@ -240,6 +254,8 @@ namespace ProjectH.Data.Tables
         private readonly Dictionary<string, StageRuleRow> stageRulesById;
         private readonly Dictionary<string, List<EncounterRow>> encountersByKey;
         private readonly Dictionary<string, List<DropRow>> dropsByTemplateId;
+        private readonly Dictionary<int, LevelCurveRow> levelCurveByLevel;
+        private readonly int maxLevel;
 
         private GameCsvTables(
             Dictionary<string, CombatUnitRow> combatUnitsById,
@@ -252,7 +268,8 @@ namespace ProjectH.Data.Tables
             Dictionary<string, List<SkillDefinition>> skillsByOwnerId,
             Dictionary<string, StageRuleRow> stageRulesById,
             Dictionary<string, List<EncounterRow>> encountersByKey,
-            Dictionary<string, List<DropRow>> dropsByTemplateId)
+            Dictionary<string, List<DropRow>> dropsByTemplateId,
+            Dictionary<int, LevelCurveRow> levelCurveByLevel)
         {
             this.combatUnitsById = combatUnitsById;
             this.battleSetupsById = battleSetupsById;
@@ -265,6 +282,8 @@ namespace ProjectH.Data.Tables
             this.stageRulesById = stageRulesById;
             this.encountersByKey = encountersByKey;
             this.dropsByTemplateId = dropsByTemplateId;
+            this.levelCurveByLevel = levelCurveByLevel;
+            maxLevel = levelCurveByLevel.Count > 0 ? levelCurveByLevel.Keys.Max() : 1;
         }
 
         public static bool TryLoad(out GameCsvTables tables, out string error)
@@ -352,7 +371,13 @@ namespace ProjectH.Data.Tables
                 return false;
             }
 
-            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId);
+            var levelCurveByLevel = BuildLevelCurve(loadedTables["level_curve"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId, levelCurveByLevel);
             return true;
         }
 
@@ -401,6 +426,18 @@ namespace ProjectH.Data.Tables
             return skillsByOwnerId.TryGetValue(ownerId.Trim(), out var list)
                 ? list
                 : System.Array.Empty<SkillDefinition>();
+        }
+
+        public int GetMaxLevel() => maxLevel;
+
+        public int GetExpToNextLevel(int level)
+        {
+            return levelCurveByLevel.TryGetValue(level, out var row) ? row.ExpToNext : int.MaxValue;
+        }
+
+        public float GetLevelStatMultiplier(int level)
+        {
+            return levelCurveByLevel.TryGetValue(level, out var row) ? row.StatMultiplier : 1f;
         }
 
         public bool TryGetStageRule(string locationId, out StageRuleRow row)
@@ -772,6 +809,38 @@ namespace ProjectH.Data.Tables
                 }
 
                 list.Add(new SkillDefinition(ownerId, skillId, skillName, kind, effectType, value1));
+            }
+
+            return map;
+        }
+
+        private static Dictionary<int, LevelCurveRow> BuildLevelCurve(CsvTable table, out string error)
+        {
+            var map = new Dictionary<int, LevelCurveRow>();
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var level         = ParseInt(Get(r, "level"));
+                var expToNext     = ParseInt(Get(r, "expToNext"));
+                var statMult      = ParseFloat(Get(r, "statMultiplier"));
+
+                if (level <= 0)
+                {
+                    continue;
+                }
+
+                if (statMult <= 0f)
+                {
+                    statMult = 1f;
+                }
+
+                map[level] = new LevelCurveRow(level, expToNext, statMult);
+            }
+
+            if (map.Count == 0)
+            {
+                error = "level_curve.csv has no rows";
             }
 
             return map;

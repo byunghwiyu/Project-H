@@ -1,12 +1,12 @@
-﻿# level: player level, expToNext: required exp for next level
-level,expToNext
-1,30
-2,45
-3,65
-4,90
-5,120
-6,160
-7,210
-8,270
-9,340
-10,999999
+# level: character level, expToNext: exp required to reach next level, statMultiplier: stat scale factor applied to base CSV stats
+level,expToNext,statMultiplier
+1,30,1.00
+2,45,1.08
+3,65,1.17
+4,90,1.27
+5,120,1.38
+6,160,1.50
+7,210,1.63
+8,270,1.77
+9,340,1.92
+10,999999,2.10
