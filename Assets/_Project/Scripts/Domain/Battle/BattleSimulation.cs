@@ -10,14 +10,14 @@ namespace ProjectH.Battle
         private readonly BattleRoster roster;
         private readonly BattleTurnService turnService;
         private readonly IReadOnlyDictionary<string, IReadOnlyList<SkillDefinition>> skillsByTemplateId;
-        private readonly Random rng;
+        private readonly System.Random rng;
 
         public BattleSimulation(
             BattleEventBus events,
             BattleRoster roster,
             BattleTurnService turnService,
             IReadOnlyDictionary<string, IReadOnlyList<SkillDefinition>> skillsByTemplateId,
-            Random rng)
+            System.Random rng)
         {
             this.events             = events;
             this.roster             = roster;

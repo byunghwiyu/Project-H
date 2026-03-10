@@ -9,7 +9,7 @@ namespace ProjectH.Battle
         /// 기본 공격 대미지를 계산합니다.
         /// multiplier: 스킬 배율 (기본 공격 시 1.0f)
         /// </summary>
-        public static DamageResult Calculate(BattleUnit actor, BattleUnit target, float multiplier, Random rng)
+        public static DamageResult Calculate(BattleUnit actor, BattleUnit target, float multiplier, System.Random rng)
         {
             // 1. 회피 판정
             if (target.Stat.Evasion > 0f && rng.NextDouble() < target.Stat.Evasion)

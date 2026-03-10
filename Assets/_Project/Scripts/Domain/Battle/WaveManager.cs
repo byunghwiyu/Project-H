@@ -10,12 +10,12 @@ namespace ProjectH.Battle
     {
         private readonly string locationId;
         private readonly GameCsvTables tables;
-        private readonly Random rng;
+        private readonly System.Random rng;
         private int stagesClearedCount;
 
         public int StagesClearedCount => stagesClearedCount;
 
-        public WaveManager(string locationId, GameCsvTables tables, Random rng)
+        public WaveManager(string locationId, GameCsvTables tables, System.Random rng)
         {
             this.locationId = locationId;
             this.tables = tables;

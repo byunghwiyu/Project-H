@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -18,7 +17,7 @@ namespace ProjectH.Battle
             BattleUnit actor,
             BattleRoster roster,
             IReadOnlyList<SkillDefinition> skills,
-            Random rng,
+            System.Random rng,
             BattleEventBus events)
         {
             if (!actor.IsManaFull)
@@ -52,7 +51,7 @@ namespace ProjectH.Battle
             BattleUnit actor,
             BattleRoster roster,
             SkillDefinition skill,
-            Random rng,
+            System.Random rng,
             BattleEventBus events)
         {
             // 스킬ID 기반으로 개별 구현. 새 스킬 추가 시 case 추가.

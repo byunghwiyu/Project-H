@@ -11,7 +11,7 @@ namespace ProjectH.Battle
         public static List<string> Resolve(
             IEnumerable<string> killedTemplateIds,
             GameCsvTables tables,
-            Random rng)
+            System.Random rng)
         {
             var dropped = new List<string>();
             foreach (var templateId in killedTemplateIds)
