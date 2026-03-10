@@ -26,6 +26,12 @@ namespace ProjectH.Battle
             byRuntimeId[unit.RuntimeUnitId] = unit;
         }
 
+        /// <summary>생존 여부와 관계없이 runtimeId로 유닛을 조회합니다.</summary>
+        public bool TryGetUnit(string runtimeUnitId, out BattleUnit unit)
+        {
+            return byRuntimeId.TryGetValue(runtimeUnitId ?? string.Empty, out unit);
+        }
+
         public bool TryGetAlive(string runtimeUnitId, out BattleUnit unit)
         {
             if (byRuntimeId.TryGetValue(runtimeUnitId, out unit) && unit.IsAlive)

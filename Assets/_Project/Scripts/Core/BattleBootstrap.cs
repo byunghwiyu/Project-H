@@ -25,6 +25,9 @@ namespace ProjectH.Core
         private bool paused;
         private bool isActionAnimating;
 
+        // HUD
+        private BattleHUD hud;
+
         // 연속 전투 상태
         private GameCsvTables tables;
         private BattleSetupRow setup;
@@ -82,11 +85,22 @@ namespace ProjectH.Core
             ApplyPassivesAndExtendLookup(roster.Allies);
 
             waveManager = new WaveManager(locationId, tables, rng);
+
+            hud = new GameObject("BattleHUD").AddComponent<BattleHUD>();
+            hud.Setup(
+                eventBus,
+                roster,
+                id => runtimeViews.TryGetValue(id, out var go) && go != null ? go.transform.position : Vector3.zero,
+                () => SceneNavigator.TryLoad("Dungeon"),
+                TogglePause);
+
             SpawnNextWave();
         }
 
         private void Update()
         {
+            hud?.SetProgress(elapsed, turnIntervalSec);
+
             if (paused || isActionAnimating)
             {
                 return;
@@ -106,11 +120,13 @@ namespace ProjectH.Core
                 {
                     paused = true;
                     Debug.Log("[battle] Game over - all allies defeated");
+                    hud?.ShowGameOver(() => SceneNavigator.TryLoad("Dungeon"));
                 }
                 else
                 {
                     // 적 전멸 → 다음 wave
                     waveManager.OnWaveCleared();
+                    hud?.OnWaveCleared(waveManager.StagesClearedCount);
                     var killed = roster.ExtractKilledEnemies();
                     CleanupEnemyViews(killed);
                     ResolveAndLogDrops(killed);
