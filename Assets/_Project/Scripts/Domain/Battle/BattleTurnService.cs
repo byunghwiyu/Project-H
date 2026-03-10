@@ -55,12 +55,13 @@ namespace ProjectH.Battle
 
         private static float AverageAgility(IReadOnlyList<BattleUnit> units)
         {
-            if (units.Count == 0)
+            var alive = units.Where(x => x.IsAlive).ToList();
+            if (alive.Count == 0)
             {
                 return 0f;
             }
 
-            return (float)units.Average(x => x.Stat.Agility);
+            return (float)alive.Average(x => x.Stat.Agility);
         }
     }
 }

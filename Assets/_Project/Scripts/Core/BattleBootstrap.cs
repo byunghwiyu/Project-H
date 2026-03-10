@@ -25,6 +25,14 @@ namespace ProjectH.Core
         private bool paused;
         private bool isActionAnimating;
 
+        // 연속 전투 상태
+        private GameCsvTables tables;
+        private BattleSetupRow setup;
+        private string locationId;
+        private System.Random rng;
+        private WaveManager waveManager;
+        private Dictionary<string, IReadOnlyList<SkillDefinition>> skillsByTemplateId;
+
         private static BattleBootstrap instance;
 
         private void Awake()
@@ -60,20 +68,21 @@ namespace ProjectH.Core
             eventBus.OnPublished += OnBattleEvent;
 
             roster = new BattleRoster();
+            rng = new System.Random();
+            skillsByTemplateId = new Dictionary<string, IReadOnlyList<SkillDefinition>>();
 
-            if (!TryBuildSetupFromTables(out var allies, out var enemies, out var tables, out var loadError))
+            if (!TryInitialize(out var allyDefs, out var error))
             {
-                Debug.LogError($"[battle] {loadError}");
+                Debug.LogError($"[battle] {error}");
                 enabled = false;
                 return;
             }
 
-            SpawnTeam(allies, BattleTeam.Ally);
-            SpawnTeam(enemies, BattleTeam.Enemy);
+            SpawnTeam(allyDefs, BattleTeam.Ally);
+            ApplyPassivesAndExtendLookup(roster.Allies);
 
-            var skillsByTemplateId = BuildSkillLookup(tables, roster);
-            simulation = new BattleSimulation(eventBus, roster, new BattleTurnService(), skillsByTemplateId, new System.Random());
-            simulation.Start();
+            waveManager = new WaveManager(locationId, tables, rng);
+            SpawnNextWave();
         }
 
         private void Update()
@@ -93,8 +102,20 @@ namespace ProjectH.Core
             var progressed = simulation.TickOneTurn();
             if (!progressed)
             {
-                paused = true;
-                Debug.Log("[battle] finished");
+                if (!roster.HasAlive(BattleTeam.Ally))
+                {
+                    paused = true;
+                    Debug.Log("[battle] Game over - all allies defeated");
+                }
+                else
+                {
+                    // 적 전멸 → 다음 wave
+                    waveManager.OnWaveCleared();
+                    var killed = roster.ExtractKilledEnemies();
+                    CleanupEnemyViews(killed);
+                    ResolveAndLogDrops(killed);
+                    SpawnNextWave();
+                }
             }
         }
 
@@ -104,11 +125,13 @@ namespace ProjectH.Core
             Debug.Log($"[battle] paused={paused}");
         }
 
-        private bool TryBuildSetupFromTables(out BattleUnitDefinition[] allies, out BattleUnitDefinition[] enemies, out GameCsvTables tables, out string error)
+        /// <summary>
+        /// 테이블 로드, setup 읽기, ally 정의 생성.
+        /// locationId는 파견 데이터 또는 setup.EnemyLocationId에서 결정됩니다.
+        /// </summary>
+        private bool TryInitialize(out BattleUnitDefinition[] allyDefs, out string error)
         {
-            allies = Array.Empty<BattleUnitDefinition>();
-            enemies = Array.Empty<BattleUnitDefinition>();
-            tables = null;
+            allyDefs = Array.Empty<BattleUnitDefinition>();
             error = string.Empty;
 
             if (!GameCsvTables.TryLoad(out tables, out var loadError))
@@ -117,7 +140,7 @@ namespace ProjectH.Core
                 return false;
             }
 
-            if (!tables.TryGetBattleSetup(battleSetupId, out var setup, out error))
+            if (!tables.TryGetBattleSetup(battleSetupId, out setup, out error))
             {
                 return false;
             }
@@ -125,22 +148,17 @@ namespace ProjectH.Core
             turnIntervalSec = setup.TurnIntervalSec;
 
             List<string> allyIds;
-            string enemyLocationId;
-            int enemyWaveIndex;
-
-            if (PlayerAccountService.TryGetDispatch(out var dispatchedLocationId, out var dispatchedWaveIndex, out var dispatchedAllies))
+            if (PlayerAccountService.TryGetDispatch(out var dispatchedLocationId, out _, out var dispatchedAllies))
             {
                 allyIds = dispatchedAllies;
-                enemyLocationId = dispatchedLocationId;
-                enemyWaveIndex = dispatchedWaveIndex;
+                locationId = dispatchedLocationId;
                 PlayerAccountService.ClearDispatch();
             }
             else
             {
                 var maxPartySize = Mathf.Max(1, tables.GetDefineInt("maxPartySize", 4));
                 allyIds = PlayerAccountService.OwnedTemplateIds.Take(maxPartySize).ToList();
-                enemyLocationId = setup.EnemyLocationId;
-                enemyWaveIndex = setup.EnemyWaveIndex;
+                locationId = setup.EnemyLocationId;
             }
 
             if (allyIds.Count == 0)
@@ -149,91 +167,113 @@ namespace ProjectH.Core
                 return false;
             }
 
-            if (!TryBuildDefinitionsFromIds(
-                    tables,
-                    allyIds,
-                    BattleTeam.Ally,
-                    setup.AllyStartX,
-                    setup.AllyStartY,
-                    setup.AllySpacingX,
-                    out allies,
-                    out error))
-            {
-                return false;
-            }
-
-            var enemyIds = tables.BuildEnemyTemplateIds(enemyLocationId, enemyWaveIndex);
-            if (enemyIds.Count == 0)
-            {
-                error = $"location_waves.csv has no rows for locationId={enemyLocationId}, waveIndex={enemyWaveIndex}";
-                return false;
-            }
-
-            if (!TryBuildDefinitionsFromIds(
-                    tables,
-                    enemyIds,
-                    BattleTeam.Enemy,
-                    setup.EnemyStartX,
-                    setup.EnemyStartY,
-                    setup.EnemySpacingX,
-                    out enemies,
-                    out error))
-            {
-                return false;
-            }
-
-            return true;
+            return TryBuildDefinitionsFromIds(
+                tables, allyIds, BattleTeam.Ally,
+                setup.AllyStartX, setup.AllyStartY, setup.AllySpacingX,
+                out allyDefs, out error);
         }
 
         /// <summary>
-        /// 모든 살아있는 유닛의 templateId → skills 딕셔너리를 구성합니다.
-        /// PassiveApplicator도 여기서 적용합니다.
+        /// 다음 전투 wave를 스폰합니다.
+        /// EXPLORE/HIDDEN 스테이지는 자동으로 통과(미구현)하고 전투 가능한 스테이지까지 넘어갑니다.
         /// </summary>
-        private static IReadOnlyDictionary<string, IReadOnlyList<SkillDefinition>> BuildSkillLookup(
-            GameCsvTables tables, BattleRoster roster)
+        private void SpawnNextWave()
         {
-            var result = new Dictionary<string, IReadOnlyList<SkillDefinition>>();
-            var allUnits = new List<BattleUnit>();
-            allUnits.AddRange(roster.Allies);
-            allUnits.AddRange(roster.Enemies);
+            // EXPLORE/HIDDEN은 자동 통과 (무한 루프 방지를 위해 상한 설정)
+            const int autoPassLimit = 20;
+            var autoPassCount = 0;
+            WaveStageType stageType;
 
-            foreach (var unit in allUnits)
+            while (true)
             {
-                if (result.ContainsKey(unit.TemplateId))
+                stageType = waveManager.DetermineNextStageType();
+                if (stageType == WaveStageType.Explore || stageType == WaveStageType.Hidden)
                 {
+                    Debug.Log($"[wave] {stageType} stage - auto pass (미구현)");
+                    waveManager.OnWaveCleared();
+                    autoPassCount++;
+                    if (autoPassCount >= autoPassLimit)
+                    {
+                        Debug.LogWarning("[wave] Auto-pass limit reached. Defaulting to Battle stage.");
+                        stageType = WaveStageType.Battle;
+                        break;
+                    }
+
                     continue;
                 }
 
-                var skills = tables.GetSkills(unit.TemplateId);
-                result[unit.TemplateId] = skills;
+                break;
+            }
 
-                // 패시브 반영 스탯 계산
+            var enemyIds = waveManager.SelectEncounterEnemyIds(stageType);
+            if (enemyIds.Count == 0)
+            {
+                Debug.LogError($"[wave] No encounter found for {stageType} at locationId={locationId}");
+                paused = true;
+                return;
+            }
+
+            if (!TryBuildDefinitionsFromIds(
+                    tables, enemyIds, BattleTeam.Enemy,
+                    setup.EnemyStartX, setup.EnemyStartY, setup.EnemySpacingX,
+                    out var defs, out var err))
+            {
+                Debug.LogError($"[wave] {err}");
+                paused = true;
+                return;
+            }
+
+            Debug.Log($"[wave] Stage {waveManager.StagesClearedCount + 1}: {stageType} — {enemyIds.Count} enemies");
+            SpawnTeam(defs, BattleTeam.Enemy);
+            ApplyPassivesAndExtendLookup(roster.Enemies);
+
+            simulation = new BattleSimulation(eventBus, roster, new BattleTurnService(), skillsByTemplateId, rng);
+            simulation.Start();
+            elapsed = 0f;
+        }
+
+        /// <summary>사망한 적 유닛의 뷰(GameObject)를 제거합니다.</summary>
+        private void CleanupEnemyViews(List<(string runtimeId, string templateId)> killed)
+        {
+            foreach (var (runtimeId, _) in killed)
+            {
+                if (runtimeViews.TryGetValue(runtimeId, out var go) && go != null)
+                {
+                    Destroy(go);
+                }
+
+                runtimeViews.Remove(runtimeId);
+            }
+        }
+
+        /// <summary>드랍 아이템을 계산하고 로그에 출력합니다. (인벤토리 미구현)</summary>
+        private void ResolveAndLogDrops(List<(string runtimeId, string templateId)> killed)
+        {
+            var templateIds = killed.Select(k => k.templateId);
+            var dropped = DropResolver.Resolve(templateIds, tables, rng);
+            if (dropped.Count > 0)
+            {
+                Debug.Log($"[wave] Drops: {string.Join(", ", dropped)}");
+            }
+        }
+
+        /// <summary>
+        /// 유닛 목록에 대해 스킬 룩업을 확장하고 패시브 스탯을 계산합니다.
+        /// 이미 등록된 templateId라도 새 유닛 인스턴스에 패시브를 재적용합니다.
+        /// </summary>
+        private void ApplyPassivesAndExtendLookup(IReadOnlyList<BattleUnit> units)
+        {
+            foreach (var unit in units)
+            {
+                if (!skillsByTemplateId.ContainsKey(unit.TemplateId))
+                {
+                    skillsByTemplateId[unit.TemplateId] = tables.GetSkills(unit.TemplateId);
+                }
+
+                var skills = skillsByTemplateId[unit.TemplateId];
                 var computed = PassiveApplicator.Apply(unit.BaseStat, skills);
                 unit.SetComputedStat(computed);
             }
-
-            return result;
-        }
-
-        private static List<string> ParseIdList(string csv)
-        {
-            var list = new List<string>();
-            if (string.IsNullOrWhiteSpace(csv))
-            {
-                return list;
-            }
-
-            var parts = csv.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var p in parts)
-            {
-                var id = p.Trim();
-                if (!string.IsNullOrWhiteSpace(id))
-                {
-                    list.Add(id);
-                }
-            }
-
-            return list;
         }
 
         private static bool TryBuildDefinitionsFromIds(
@@ -397,6 +437,7 @@ namespace ProjectH.Core
                             actorView?.OnTurnStarted();
                         }
                     }
+
                     break;
                 case BattleEventType.Damaged:
                     Debug.Log($"[battle] damage {e.TargetRuntimeId} -{e.Value}");
@@ -405,6 +446,7 @@ namespace ProjectH.Core
                         var damagedView = damagedGo.GetComponent<UnitView>();
                         damagedView?.OnDamaged(e.Value);
                     }
+
                     break;
                 case BattleEventType.Died:
                     Debug.Log($"[battle] died {e.TargetRuntimeId}");
@@ -420,6 +462,7 @@ namespace ProjectH.Core
                             deadGo.SetActive(false);
                         }
                     }
+
                     break;
                 case BattleEventType.ActiveSkillUsed:
                     Debug.Log($"[battle] skill used by {e.SourceRuntimeId}");
@@ -436,6 +479,7 @@ namespace ProjectH.Core
                     {
                         thornGo.GetComponent<UnitView>()?.OnDamaged(e.Value);
                     }
+
                     break;
                 case BattleEventType.CounterAttacked:
                     Debug.Log($"[battle] counter {e.SourceRuntimeId} -> {e.TargetRuntimeId} -{e.Value}");
@@ -443,6 +487,7 @@ namespace ProjectH.Core
                     {
                         counterGo.GetComponent<UnitView>()?.OnDamaged(e.Value);
                     }
+
                     break;
             }
         }

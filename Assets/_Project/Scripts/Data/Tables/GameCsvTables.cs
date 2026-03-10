@@ -139,6 +139,74 @@ namespace ProjectH.Data.Tables
         public bool IsOpen { get; }
     }
 
+    public readonly struct StageRuleRow
+    {
+        public StageRuleRow(
+            string locationId,
+            float battleStageWeight,
+            float exploreStageWeight,
+            int bossEveryStageClears,
+            int hiddenEveryStageClears,
+            float hiddenEnterChance)
+        {
+            LocationId = locationId;
+            BattleStageWeight = battleStageWeight;
+            ExploreStageWeight = exploreStageWeight;
+            BossEveryStageClears = bossEveryStageClears;
+            HiddenEveryStageClears = hiddenEveryStageClears;
+            HiddenEnterChance = hiddenEnterChance;
+        }
+
+        public string LocationId { get; }
+        public float BattleStageWeight { get; }
+        public float ExploreStageWeight { get; }
+        public int BossEveryStageClears { get; }
+        public int HiddenEveryStageClears { get; }
+        public float HiddenEnterChance { get; }
+    }
+
+    public readonly struct EncounterRow
+    {
+        public EncounterRow(
+            string locationId,
+            string stageType,
+            string encounterId,
+            int weight,
+            string monsterTemplateId,
+            int count)
+        {
+            LocationId = locationId;
+            StageType = stageType;
+            EncounterId = encounterId;
+            Weight = weight;
+            MonsterTemplateId = monsterTemplateId;
+            Count = count;
+        }
+
+        public string LocationId { get; }
+        public string StageType { get; }
+        public string EncounterId { get; }
+        public int Weight { get; }
+        public string MonsterTemplateId { get; }
+        public int Count { get; }
+    }
+
+    public readonly struct DropRow
+    {
+        public DropRow(string monsterTemplateId, string itemId, string itemName, float dropRate)
+        {
+            MonsterTemplateId = monsterTemplateId;
+            ItemId = itemId;
+            ItemName = itemName;
+            DropRate = dropRate;
+        }
+
+        public string MonsterTemplateId { get; }
+        public string ItemId { get; }
+        public string ItemName { get; }
+        public float DropRate { get; }
+    }
+
     public sealed class GameCsvTables
     {
         private static readonly string[] RequiredTableNames =
@@ -169,6 +237,9 @@ namespace ProjectH.Data.Tables
         private readonly Dictionary<string, int> defineValues;
         private readonly Dictionary<string, List<(string monsterTemplateId, int count)>> waveMonsterRows;
         private readonly Dictionary<string, List<SkillDefinition>> skillsByOwnerId;
+        private readonly Dictionary<string, StageRuleRow> stageRulesById;
+        private readonly Dictionary<string, List<EncounterRow>> encountersByKey;
+        private readonly Dictionary<string, List<DropRow>> dropsByTemplateId;
 
         private GameCsvTables(
             Dictionary<string, CombatUnitRow> combatUnitsById,
@@ -178,7 +249,10 @@ namespace ProjectH.Data.Tables
             List<LocationRow> locations,
             Dictionary<string, int> defineValues,
             Dictionary<string, List<(string monsterTemplateId, int count)>> waveMonsterRows,
-            Dictionary<string, List<SkillDefinition>> skillsByOwnerId)
+            Dictionary<string, List<SkillDefinition>> skillsByOwnerId,
+            Dictionary<string, StageRuleRow> stageRulesById,
+            Dictionary<string, List<EncounterRow>> encountersByKey,
+            Dictionary<string, List<DropRow>> dropsByTemplateId)
         {
             this.combatUnitsById = combatUnitsById;
             this.battleSetupsById = battleSetupsById;
@@ -188,6 +262,9 @@ namespace ProjectH.Data.Tables
             this.defineValues = defineValues;
             this.waveMonsterRows = waveMonsterRows;
             this.skillsByOwnerId = skillsByOwnerId;
+            this.stageRulesById = stageRulesById;
+            this.encountersByKey = encountersByKey;
+            this.dropsByTemplateId = dropsByTemplateId;
         }
 
         public static bool TryLoad(out GameCsvTables tables, out string error)
@@ -257,7 +334,25 @@ namespace ProjectH.Data.Tables
                 return false;
             }
 
-            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId);
+            var stageRulesById = BuildStageRules(loadedTables["field_stage_rules"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            var encountersByKey = BuildEncounters(loadedTables["field_stage_encounters"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            var dropsByTemplateId = BuildDrops(loadedTables["monster_drops"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId);
             return true;
         }
 
@@ -306,6 +401,29 @@ namespace ProjectH.Data.Tables
             return skillsByOwnerId.TryGetValue(ownerId.Trim(), out var list)
                 ? list
                 : System.Array.Empty<SkillDefinition>();
+        }
+
+        public bool TryGetStageRule(string locationId, out StageRuleRow row)
+        {
+            return stageRulesById.TryGetValue(locationId ?? string.Empty, out row);
+        }
+
+        public IReadOnlyList<EncounterRow> GetEncounterRows(string locationId, string stageType)
+        {
+            var key = BuildEncounterKey(locationId, stageType);
+            return encountersByKey.TryGetValue(key, out var list) ? list : System.Array.Empty<EncounterRow>();
+        }
+
+        public IReadOnlyList<DropRow> GetDropRows(string monsterTemplateId)
+        {
+            if (string.IsNullOrWhiteSpace(monsterTemplateId))
+            {
+                return System.Array.Empty<DropRow>();
+            }
+
+            return dropsByTemplateId.TryGetValue(monsterTemplateId.Trim(), out var list)
+                ? list
+                : System.Array.Empty<DropRow>();
         }
 
         public int GetDefineInt(string key, int fallback)
@@ -475,7 +593,6 @@ namespace ProjectH.Data.Tables
 
                 if (string.IsNullOrWhiteSpace(setupId) ||
                     string.IsNullOrWhiteSpace(enemyLocationId) ||
-                    enemyWaveIndex <= 0 ||
                     turnIntervalSec <= 0f)
                 {
                     error = "battle_setup.csv has an invalid row";
@@ -658,6 +775,98 @@ namespace ProjectH.Data.Tables
             }
 
             return map;
+        }
+
+        private static Dictionary<string, StageRuleRow> BuildStageRules(CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, StageRuleRow>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var locationId          = Get(r, "locationId");
+                var battleStageWeight   = ParseFloat(Get(r, "battleStageWeight"));
+                var exploreStageWeight  = ParseFloat(Get(r, "exploreStageWeight"));
+                var bossEvery           = ParseInt(Get(r, "bossEveryStageClears"));
+                var hiddenEvery         = ParseInt(Get(r, "hiddenEveryStageClears"));
+                var hiddenChance        = ParseFloat(Get(r, "hiddenEnterChance"));
+
+                if (string.IsNullOrWhiteSpace(locationId))
+                {
+                    continue;
+                }
+
+                map[locationId] = new StageRuleRow(locationId, battleStageWeight, exploreStageWeight, bossEvery, hiddenEvery, hiddenChance);
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, List<EncounterRow>> BuildEncounters(CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, List<EncounterRow>>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var locationId        = Get(r, "locationId");
+                var stageType         = Get(r, "stageType");
+                var encounterId       = Get(r, "encounterId");
+                var weight            = Math.Max(1, ParseInt(Get(r, "weight")));
+                var monsterTemplateId = Get(r, "monsterTemplateId");
+                var count             = Math.Max(1, ParseInt(Get(r, "count")));
+
+                if (string.IsNullOrWhiteSpace(locationId) || string.IsNullOrWhiteSpace(stageType) ||
+                    string.IsNullOrWhiteSpace(encounterId) || string.IsNullOrWhiteSpace(monsterTemplateId))
+                {
+                    continue;
+                }
+
+                var key = BuildEncounterKey(locationId, stageType);
+                if (!map.TryGetValue(key, out var list))
+                {
+                    list = new List<EncounterRow>();
+                    map[key] = list;
+                }
+
+                list.Add(new EncounterRow(locationId, stageType.ToUpperInvariant(), encounterId, weight, monsterTemplateId, count));
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, List<DropRow>> BuildDrops(CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, List<DropRow>>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var monsterTemplateId = Get(r, "monsterTemplateId");
+                var itemId            = Get(r, "itemId");
+                var itemName          = Get(r, "itemName");
+                var dropRate          = ParseFloat(Get(r, "dropRate"));
+
+                if (string.IsNullOrWhiteSpace(monsterTemplateId) || string.IsNullOrWhiteSpace(itemId))
+                {
+                    continue;
+                }
+
+                if (!map.TryGetValue(monsterTemplateId, out var list))
+                {
+                    list = new List<DropRow>();
+                    map[monsterTemplateId] = list;
+                }
+
+                list.Add(new DropRow(monsterTemplateId, itemId, itemName, dropRate));
+            }
+
+            return map;
+        }
+
+        private static string BuildEncounterKey(string locationId, string stageType)
+        {
+            return $"{locationId.Trim()}::{stageType.Trim().ToUpperInvariant()}";
         }
 
         private static string BuildWaveKey(string locationId, int waveIndex)

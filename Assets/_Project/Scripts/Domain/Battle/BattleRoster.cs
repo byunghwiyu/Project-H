@@ -43,6 +43,24 @@ namespace ProjectH.Battle
             return source.Any(x => x.IsAlive);
         }
 
+        /// <summary>사망한 적 유닛을 roster에서 제거하고 (runtimeId, templateId) 목록을 반환합니다.</summary>
+        public List<(string runtimeId, string templateId)> ExtractKilledEnemies()
+        {
+            var killed = new List<(string, string)>();
+            for (var i = enemies.Count - 1; i >= 0; i--)
+            {
+                var e = enemies[i];
+                if (!e.IsAlive)
+                {
+                    killed.Add((e.RuntimeUnitId, e.TemplateId));
+                    byRuntimeId.Remove(e.RuntimeUnitId);
+                    enemies.RemoveAt(i);
+                }
+            }
+
+            return killed;
+        }
+
         public BattleUnit NextAlive(BattleTeam team, int startIndex)
         {
             var source = team == BattleTeam.Ally ? allies : enemies;
