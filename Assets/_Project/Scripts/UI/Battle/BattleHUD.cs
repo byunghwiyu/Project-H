@@ -9,11 +9,20 @@ using UnityEngine.UI;
 
 namespace ProjectH.UI.Battle
 {
+    /// <summary>
+    /// 전투 뷰어 HUD. 참고 레이아웃:
+    ///   상단: 현장 이름 헤더
+    ///   중앙: 카메라 뷰포트 (전투 장면)
+    ///   뷰포트 아래: Wave/프로그레스 바
+    ///   그 아래: 전투 로그
+    ///   하단: 후퇴하기 / 닫기 버튼
+    /// </summary>
     public sealed class BattleHUD : MonoBehaviour
     {
         private BattleEventBus eventBus;
         private BattleRoster roster;
         private Func<string, Vector3> getWorldPos;
+        private Func<string, string> nameResolver;
 
         private Canvas overlayCanvas;
         private RectTransform canvasRect;
@@ -22,64 +31,72 @@ namespace ProjectH.UI.Battle
         private Text battleLogText;
 
         private readonly Queue<string> logLines = new();
-        private const int MaxLogLines = 18;
+        private const int MaxLogLines = 6;
+
+        // 뷰포트 영역 (1080x1920 기준 정규화 앵커)
+        private const float ViewportTop = 0.96f;
+        private const float ViewportBottom = 0.42f;
+        private const float ViewportLeft = 0.02f;
+        private const float ViewportRight = 0.98f;
 
         public void Setup(
             BattleEventBus eventBus,
             BattleRoster roster,
             Func<string, Vector3> getWorldPos,
+            Func<string, string> nameResolver,
+            string locationName,
             Action onRetreat,
-            Action onTogglePause)
+            Action onClose)
         {
             this.eventBus = eventBus;
             this.roster = roster;
             this.getWorldPos = getWorldPos;
+            this.nameResolver = nameResolver;
 
-            BuildUI(onRetreat, onTogglePause);
+            BuildUI(locationName, onRetreat, onClose);
             eventBus.OnPublished += OnBattleEvent;
         }
 
         private void OnDestroy()
         {
             if (eventBus != null)
-            {
                 eventBus.OnPublished -= OnBattleEvent;
-            }
         }
 
-        /// <summary>매 프레임 호출. 턴 대기 진행도를 업데이트합니다.</summary>
         public void SetProgress(float elapsed, float interval)
         {
-            if (progressFill == null)
-            {
-                return;
-            }
-
+            if (progressFill == null) return;
             progressFill.fillAmount = interval > 0f ? Mathf.Clamp01(elapsed / interval) : 0f;
         }
 
-        /// <summary>Wave 클리어 시 호출. 로그에 기록하고 Wave 카운터를 갱신합니다.</summary>
         public void OnWaveCleared(int clearedCount)
         {
-            AddLog($"<color=#FFFFFF>── Wave {clearedCount} 클리어 ──</color>");
+            AddLog($"<color=#FFFFFF>-- Wave {clearedCount} 클리어 --</color>");
             if (waveLabel != null)
-            {
                 waveLabel.text = $"Wave {clearedCount + 1}";
-            }
         }
 
-        /// <summary>시스템 메시지를 전투 로그에 추가합니다.</summary>
-        public void LogMessage(string richText)
-        {
-            AddLog(richText);
-        }
+        public void LogMessage(string richText) => AddLog(richText);
 
-        /// <summary>전투 패배 시 호출. 패배 오버레이를 표시합니다.</summary>
         public void ShowGameOver(Action onReturn)
         {
-            AddLog("<color=#FF3333>── 전투 패배 ──</color>");
+            AddLog("<color=#FF3333>-- 전투 패배 --</color>");
+            ShowOverlay("전투 패배", new Color(1f, 0.3f, 0.3f), onReturn);
+        }
 
-            var go = new GameObject("GameOverOverlay");
+        public void ShowVictory(
+            int wavesCleared, int maxWaves,
+            IReadOnlyList<DropRow> drops,
+            IReadOnlyList<string> eventLogs,
+            Action onReturn)
+        {
+            AddLog($"<color=#FFD700>-- 파견 완료 ({wavesCleared}/{maxWaves} waves) --</color>");
+            ShowOverlay("파견 완료", new Color(0.85f, 0.75f, 0.25f), onReturn);
+        }
+
+        private void ShowOverlay(string title, Color titleColor, Action onReturn)
+        {
+            var go = new GameObject("EndOverlay");
             go.transform.SetParent(overlayCanvas.transform, false);
             var bg = go.AddComponent<Image>();
             bg.color = new Color(0f, 0f, 0f, 0.75f);
@@ -88,103 +105,25 @@ namespace ProjectH.UI.Battle
             bgRect.anchorMax = Vector2.one;
             bgRect.sizeDelta = Vector2.zero;
 
-            CreateText(go.transform, "전투 패배", 52, TextAnchor.MiddleCenter, new Vector2(0f, 70f), new Vector2(500f, 90f));
-            CreateButton(go.transform, "현장으로 복귀", Vector2.zero, new Vector2(220f, 52f), onReturn);
-        }
+            var titleTxt = CreateText(go.transform, title, 48, TextAnchor.MiddleCenter,
+                Vector2.zero, new Vector2(600f, 80f));
+            titleTxt.color = titleColor;
 
-        /// <summary>파견 완료 시 결과 화면을 표시합니다.</summary>
-        public void ShowVictory(
-            int wavesCleared,
-            int maxWaves,
-            IReadOnlyList<DropRow> drops,
-            IReadOnlyList<string> eventLogs,
-            Action onReturn)
-        {
-            AddLog($"<color=#FFD700>── 파견 완료 ({wavesCleared}/{maxWaves} waves) ──</color>");
-
-            // 전체를 덮는 반투명 배경
-            var overlay = new GameObject("VictoryOverlay");
-            overlay.transform.SetParent(overlayCanvas.transform, false);
-            var overlayImg = overlay.AddComponent<Image>();
-            overlayImg.color = new Color(0f, 0f, 0.04f, 0.82f);
-            var overlayRect = overlay.GetComponent<RectTransform>();
-            overlayRect.anchorMin = Vector2.zero;
-            overlayRect.anchorMax = Vector2.one;
-            overlayRect.sizeDelta = Vector2.zero;
-
-            // 결과 카드 (중앙)
-            var card = new GameObject("ResultCard");
-            card.transform.SetParent(overlay.transform, false);
-            card.AddComponent<Image>().color = new Color(0.08f, 0.10f, 0.14f, 1f);
-            var cardRect = card.GetComponent<RectTransform>();
-            cardRect.sizeDelta = new Vector2(560f, 560f);
-            cardRect.anchoredPosition = Vector2.zero;
-
-            // 제목
-            CreateText(card.transform, "Dispatch Complete", 28, TextAnchor.UpperCenter,
-                new Vector2(0f, 248f), new Vector2(520f, 48f)).color = new Color(0.85f, 0.75f, 0.25f);
-
-            // 웨이브 수
-            CreateText(card.transform, $"Waves Cleared: {wavesCleared} / {maxWaves}", 16, TextAnchor.UpperCenter,
-                new Vector2(0f, 200f), new Vector2(520f, 30f)).color = new Color(0.75f, 0.85f, 1f);
-
-            // 드랍 목록
-            var dropSummary = BuildDropSummary(drops);
-            CreateText(card.transform, "Drops:\n" + (dropSummary.Length > 0 ? dropSummary : "(none)"),
-                14, TextAnchor.UpperLeft, new Vector2(-250f, 158f), new Vector2(520f, 180f))
-                .color = new Color(0.82f, 0.88f, 0.95f);
-
-            // 이벤트 로그 (레벨업 등)
-            var events = eventLogs.Count > 0
-                ? string.Join("\n", eventLogs.Take(6))
-                : "(none)";
-            CreateText(card.transform, "Events:\n" + events,
-                13, TextAnchor.UpperLeft, new Vector2(-250f, -60f), new Vector2(520f, 120f))
-                .color = new Color(1f, 0.88f, 0.45f);
-
-            // 복귀 버튼
-            CreateButton(card.transform, "Return to Office",
-                new Vector2(0f, -230f), new Vector2(240f, 52f), onReturn);
-        }
-
-        private static string BuildDropSummary(IReadOnlyList<DropRow> drops)
-        {
-            if (drops == null || drops.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            // 장비는 개별 표시, 재료는 합산
-            var lines = new List<string>();
-            var materials = new Dictionary<string, int>();
-            foreach (var d in drops)
-            {
-                if (d.IsEquipment)
-                {
-                    var tier = d.Grade switch { 1 => "Normal", 2 => "Rare", 3 => "Elite",
-                        4 => "Epic", 5 => "Legend", _ => $"G{d.Grade}" };
-                    lines.Add($"[{tier}] {d.ItemName} +{d.StatValue}");
-                }
-                else
-                {
-                    materials.TryGetValue(d.ItemName, out var cnt);
-                    materials[d.ItemName] = cnt + 1;
-                }
-            }
-
-            foreach (var kv in materials)
-            {
-                lines.Add($"{kv.Key} x{kv.Value}");
-            }
-
-            return string.Join("\n", lines.Take(8));
+            var btnGo = new GameObject("ReturnBtn");
+            btnGo.transform.SetParent(go.transform, false);
+            btnGo.AddComponent<Image>().color = new Color(0.18f, 0.22f, 0.28f, 0.95f);
+            btnGo.AddComponent<Button>().onClick.AddListener(() => onReturn?.Invoke());
+            var btnRect = btnGo.GetComponent<RectTransform>();
+            btnRect.sizeDelta = new Vector2(280f, 64f);
+            btnRect.anchoredPosition = new Vector2(0f, -70f);
+            CreateText(btnGo.transform, "현장으로 복귀", 22, TextAnchor.MiddleCenter,
+                Vector2.zero, new Vector2(280f, 64f));
         }
 
         // ────────────────────── UI 빌드 ──────────────────────
 
-        private void BuildUI(Action onRetreat, Action onTogglePause)
+        private void BuildUI(string locationName, Action onRetreat, Action onClose)
         {
-            // 메인 Canvas (ScreenSpaceOverlay, 세로 모드 1080×1920)
             var canvasGO = new GameObject("BattleCanvas");
             var canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -193,107 +132,188 @@ namespace ProjectH.UI.Battle
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080f, 1920f);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0f; // 너비 기준
+            scaler.matchWidthOrHeight = 0f;
             canvasGO.AddComponent<GraphicRaycaster>();
             overlayCanvas = canvas;
             canvasRect = canvas.GetComponent<RectTransform>();
 
-            BuildProgressBar();
+            // 뷰포트 밖 영역만 배경으로 채움 (뷰포트 위쪽 + 아래쪽)
+            BuildBackground();
+
+            BuildLocationHeader(locationName);
+            BuildViewportBorderStrips();
+            BuildWaveBar();
             BuildBattleLog();
-            BuildButtons(onRetreat, onTogglePause);
+            BuildBottomButtons(onRetreat, onClose);
         }
 
-        private void BuildProgressBar()
+        /// <summary>뷰포트 영역을 제외한 상/하 배경</summary>
+        private void BuildBackground()
         {
-            // 배경 (상단 전체 너비 스트레치)
-            var bgGO = new GameObject("ProgressBG");
-            bgGO.transform.SetParent(overlayCanvas.transform, false);
-            var bgImg = bgGO.AddComponent<Image>();
-            bgImg.color = new Color(0.1f, 0.1f, 0.1f, 0.88f);
-            var bgRect = bgGO.GetComponent<RectTransform>();
-            bgRect.anchorMin = new Vector2(0f, 1f);
-            bgRect.anchorMax = new Vector2(1f, 1f);
-            bgRect.pivot = new Vector2(0.5f, 1f);
-            bgRect.sizeDelta = new Vector2(0f, 42f);
-            bgRect.anchoredPosition = Vector2.zero;
+            var dark = new Color(0.08f, 0.08f, 0.10f, 1f);
 
-            // 채움 이미지
-            var fillGO = new GameObject("ProgressFill");
-            fillGO.transform.SetParent(bgGO.transform, false);
-            progressFill = fillGO.AddComponent<Image>();
-            progressFill.color = new Color(0.2f, 0.65f, 1f, 0.9f);
+            // 상단 배경 (뷰포트 위 ~ 화면 꼭대기)
+            var topBg = CreatePanel(overlayCanvas.transform, "TopBG", dark);
+            var topRect = topBg.GetComponent<RectTransform>();
+            topRect.anchorMin = new Vector2(0f, ViewportTop);
+            topRect.anchorMax = Vector2.one;
+            topRect.offsetMin = Vector2.zero;
+            topRect.offsetMax = Vector2.zero;
+
+            // 하단 배경 (화면 바닥 ~ 뷰포트 아래)
+            var botBg = CreatePanel(overlayCanvas.transform, "BottomBG", dark);
+            var botRect = botBg.GetComponent<RectTransform>();
+            botRect.anchorMin = Vector2.zero;
+            botRect.anchorMax = new Vector2(1f, ViewportBottom);
+            botRect.offsetMin = Vector2.zero;
+            botRect.offsetMax = Vector2.zero;
+        }
+
+        /// <summary>상단 현장 이름 헤더</summary>
+        private void BuildLocationHeader(string locationName)
+        {
+            var headerGo = CreatePanel(overlayCanvas.transform, "LocationHeader",
+                new Color(0.08f, 0.08f, 0.10f, 1f));
+            var headerRect = headerGo.GetComponent<RectTransform>();
+            headerRect.anchorMin = new Vector2(0f, ViewportTop);
+            headerRect.anchorMax = new Vector2(1f, 1f);
+            headerRect.offsetMin = Vector2.zero;
+            headerRect.offsetMax = Vector2.zero;
+
+            var nameTxt = CreateText(headerGo.transform, locationName, 28, TextAnchor.MiddleLeft,
+                Vector2.zero, Vector2.zero);
+            var nameRect = nameTxt.GetComponent<RectTransform>();
+            nameRect.anchorMin = new Vector2(0f, 0f);
+            nameRect.anchorMax = new Vector2(1f, 1f);
+            nameRect.offsetMin = new Vector2(24f, 0f);
+            nameRect.offsetMax = new Vector2(-24f, 0f);
+            nameTxt.fontStyle = FontStyle.Bold;
+        }
+
+        /// <summary>뷰포트 주변 4면 얇은 테두리 (카메라 영역을 가리지 않음)</summary>
+        private void BuildViewportBorderStrips()
+        {
+            var borderColor = new Color(0.25f, 0.25f, 0.28f, 1f);
+            const float t = 0.003f; // 테두리 두께 (정규화)
+
+            // 상 (뷰포트 위쪽 얇은 선)
+            BuildBorderStrip("BorderTop", borderColor,
+                new Vector2(ViewportLeft - t, ViewportTop),
+                new Vector2(ViewportRight + t, ViewportTop + t));
+            // 하
+            BuildBorderStrip("BorderBottom", borderColor,
+                new Vector2(ViewportLeft - t, ViewportBottom - t),
+                new Vector2(ViewportRight + t, ViewportBottom));
+            // 좌
+            BuildBorderStrip("BorderLeft", borderColor,
+                new Vector2(ViewportLeft - t, ViewportBottom - t),
+                new Vector2(ViewportLeft, ViewportTop + t));
+            // 우
+            BuildBorderStrip("BorderRight", borderColor,
+                new Vector2(ViewportRight, ViewportBottom - t),
+                new Vector2(ViewportRight + t, ViewportTop + t));
+        }
+
+        private void BuildBorderStrip(string objName, Color color, Vector2 anchorMin, Vector2 anchorMax)
+        {
+            var go = CreatePanel(overlayCanvas.transform, objName, color);
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            go.GetComponent<Image>().raycastTarget = false;
+        }
+
+        /// <summary>뷰포트 바로 아래: Wave 프로그레스 바</summary>
+        private void BuildWaveBar()
+        {
+            const float barTopAnchor = ViewportBottom;
+            const float barBottomAnchor = barTopAnchor - 0.018f; // ~34px
+
+            var barBgGo = CreatePanel(overlayCanvas.transform, "WaveBar",
+                new Color(0.12f, 0.12f, 0.14f, 1f));
+            var barBgRect = barBgGo.GetComponent<RectTransform>();
+            barBgRect.anchorMin = new Vector2(ViewportLeft, barBottomAnchor);
+            barBgRect.anchorMax = new Vector2(ViewportRight, barTopAnchor);
+            barBgRect.offsetMin = Vector2.zero;
+            barBgRect.offsetMax = Vector2.zero;
+
+            // Fill
+            var fillGo = CreatePanel(barBgGo.transform, "ProgressFill",
+                new Color(0.2f, 0.65f, 1f, 0.9f));
+            progressFill = fillGo.GetComponent<Image>();
             progressFill.type = Image.Type.Filled;
             progressFill.fillMethod = Image.FillMethod.Horizontal;
             progressFill.fillOrigin = (int)Image.OriginHorizontal.Left;
             progressFill.fillAmount = 0f;
             progressFill.raycastTarget = false;
-            var fillRect = fillGO.GetComponent<RectTransform>();
-            fillRect.anchorMin = Vector2.zero;
-            fillRect.anchorMax = Vector2.one;
-            fillRect.sizeDelta = Vector2.zero;
+            Stretch(fillGo.GetComponent<RectTransform>());
 
-            // Wave 라벨 (우측)
-            waveLabel = CreateText(bgGO.transform, "Wave 1", 16, TextAnchor.MiddleRight, Vector2.zero, new Vector2(160f, 38f));
+            // Wave label (우측)
+            waveLabel = CreateText(barBgGo.transform, "Wave 1", 16, TextAnchor.MiddleRight,
+                Vector2.zero, Vector2.zero);
             var waveLabelRect = waveLabel.GetComponent<RectTransform>();
-            waveLabelRect.anchorMin = new Vector2(1f, 0f);
+            waveLabelRect.anchorMin = new Vector2(0.7f, 0f);
             waveLabelRect.anchorMax = new Vector2(1f, 1f);
-            waveLabelRect.pivot = new Vector2(1f, 0.5f);
-            waveLabelRect.sizeDelta = new Vector2(160f, 0f);
-            waveLabelRect.anchoredPosition = new Vector2(-12f, 0f);
+            waveLabelRect.offsetMin = new Vector2(0f, 0f);
+            waveLabelRect.offsetMax = new Vector2(-12f, 0f);
         }
 
+        /// <summary>전투 로그 영역</summary>
         private void BuildBattleLog()
         {
-            var logPanelGO = new GameObject("LogPanel");
-            logPanelGO.transform.SetParent(overlayCanvas.transform, false);
-            var logPanelImg = logPanelGO.AddComponent<Image>();
-            logPanelImg.color = new Color(0f, 0f, 0f, 0.55f);
-            var logPanelRect = logPanelGO.GetComponent<RectTransform>();
-            logPanelRect.anchorMin = new Vector2(0f, 0f);
-            logPanelRect.anchorMax = new Vector2(0.72f, 0f);
-            logPanelRect.pivot = new Vector2(0f, 0f);
-            logPanelRect.sizeDelta = new Vector2(0f, 320f);
-            logPanelRect.anchoredPosition = Vector2.zero;
+            const float logTop = ViewportBottom - 0.018f; // wave bar 아래
+            const float logBottom = logTop - 0.10f; // ~192px
 
-            battleLogText = CreateText(logPanelGO.transform, string.Empty, 13, TextAnchor.LowerLeft, Vector2.zero, Vector2.zero);
+            var logPanelGo = CreatePanel(overlayCanvas.transform, "LogPanel",
+                new Color(0.06f, 0.06f, 0.08f, 0.85f));
+            var logPanelRect = logPanelGo.GetComponent<RectTransform>();
+            logPanelRect.anchorMin = new Vector2(ViewportLeft, logBottom);
+            logPanelRect.anchorMax = new Vector2(ViewportRight, logTop);
+            logPanelRect.offsetMin = Vector2.zero;
+            logPanelRect.offsetMax = Vector2.zero;
+
+            battleLogText = CreateText(logPanelGo.transform, string.Empty, 18,
+                TextAnchor.UpperLeft, Vector2.zero, Vector2.zero);
             battleLogText.supportRichText = true;
             battleLogText.verticalOverflow = VerticalWrapMode.Overflow;
             var logTextRect = battleLogText.GetComponent<RectTransform>();
             logTextRect.anchorMin = Vector2.zero;
             logTextRect.anchorMax = Vector2.one;
-            logTextRect.sizeDelta = new Vector2(-20f, -10f);
-            logTextRect.anchoredPosition = new Vector2(10f, 5f);
+            logTextRect.offsetMin = new Vector2(16f, 8f);
+            logTextRect.offsetMax = new Vector2(-16f, -8f);
         }
 
-        private void BuildButtons(Action onRetreat, Action onTogglePause)
+        /// <summary>하단 버튼: 후퇴하기 / 닫기</summary>
+        private void BuildBottomButtons(Action onRetreat, Action onClose)
         {
-            // 후퇴 버튼 (하단 우측)
-            CreateCornerButton("후퇴", new Vector2(-12f, 12f), new Vector2(180f, 72f), onRetreat);
-            // 일시정지 버튼 (그 위)
-            CreateCornerButton("일시정지", new Vector2(-12f, 92f), new Vector2(180f, 72f), onTogglePause);
+            var btnSize = new Vector2(160f, 56f);
+            var spacing = 20f;
+
+            // 닫기 (우하단)
+            BuildBottomButton("닫기", new Vector2(-24f, 24f), btnSize,
+                new Color(0.2f, 0.2f, 0.24f, 0.95f), onClose);
+
+            // 후퇴하기 (닫기 왼쪽)
+            BuildBottomButton("후퇴하기", new Vector2(-24f - btnSize.x - spacing, 24f), btnSize,
+                new Color(0.35f, 0.15f, 0.15f, 0.95f), onRetreat);
         }
 
-        /// <summary>하단 우측 앵커 기준 버튼을 생성합니다.</summary>
-        private void CreateCornerButton(string label, Vector2 offset, Vector2 size, Action onClick)
+        private void BuildBottomButton(string label, Vector2 offset, Vector2 size, Color bgColor, Action onClick)
         {
-            var go = new GameObject(label + "Button");
+            var go = new GameObject(label + "Btn");
             go.transform.SetParent(overlayCanvas.transform, false);
-            var image = go.AddComponent<Image>();
-            image.color = new Color(0.18f, 0.22f, 0.28f, 0.95f);
-            var button = go.AddComponent<Button>();
-            if (onClick != null)
-            {
-                button.onClick.AddListener(() => onClick());
-            }
-
+            go.AddComponent<Image>().color = bgColor;
+            var btn = go.AddComponent<Button>();
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
             var rect = go.GetComponent<RectTransform>();
             rect.anchorMin = new Vector2(1f, 0f);
             rect.anchorMax = new Vector2(1f, 0f);
             rect.pivot = new Vector2(1f, 0f);
             rect.sizeDelta = size;
             rect.anchoredPosition = offset;
-
-            CreateText(go.transform, label, 17, TextAnchor.MiddleCenter, Vector2.zero, size);
+            CreateText(go.transform, label, 20, TextAnchor.MiddleCenter, Vector2.zero, size);
         }
 
         // ────────────────────── 이벤트 처리 ──────────────────────
@@ -304,80 +324,91 @@ namespace ProjectH.UI.Battle
             {
                 case BattleEventType.TurnStarted:
                 {
-                    var tag = IsAlly(e.SourceRuntimeId)
-                        ? "<color=#33FF88>[아군]</color>"
-                        : "<color=#FF5555>[적군]</color>";
-                    AddLog($"{tag} {e.SourceRuntimeId} → {e.TargetRuntimeId}");
+                    var srcName = ResolveName(e.SourceRuntimeId);
+                    var tgtName = ResolveName(e.TargetRuntimeId);
+                    var srcColor = IsAlly(e.SourceRuntimeId) ? "#33FF88" : "#FF5555";
+                    var tgtColor = IsAlly(e.TargetRuntimeId) ? "#33FF88" : "#FF5555";
+                    AddLog($"<color={srcColor}>{srcName}</color>이(가) <color={tgtColor}>{tgtName}</color>을(를) 공격합니다.");
                     break;
                 }
                 case BattleEventType.Damaged:
                 {
+                    var name = ResolveName(e.TargetRuntimeId);
                     var col = IsAlly(e.TargetRuntimeId) ? new Color(1f, 0.3f, 0.3f) : new Color(1f, 0.75f, 0.2f);
-                    AddLog($"  {e.TargetRuntimeId} <color=#{Hex(col)}>-{e.Value}</color>");
+                    AddLog($" <color=#{Hex(col)}>{name} -{e.Value}</color>");
                     SpawnFloating(e.TargetRuntimeId, $"-{e.Value}", col);
                     break;
                 }
                 case BattleEventType.Healed:
                 {
+                    var srcName = ResolveName(e.SourceRuntimeId);
+                    var tgtName = ResolveName(e.TargetRuntimeId);
                     var col = new Color(0.3f, 1f, 0.5f);
-                    AddLog($"  {e.TargetRuntimeId} <color=#{Hex(col)}>+{e.Value} 회복</color>");
+                    AddLog($" <color=#{Hex(col)}>{srcName}이(가) {tgtName}의 HP를 {e.Value} 치유했습니다.</color>");
                     SpawnFloating(e.TargetRuntimeId, $"+{e.Value}", col);
                     break;
                 }
                 case BattleEventType.Evaded:
                 {
+                    var name = ResolveName(e.TargetRuntimeId);
                     var col = new Color(0.45f, 0.85f, 1f);
-                    AddLog($"  {e.TargetRuntimeId} <color=#{Hex(col)}>회피</color>");
+                    AddLog($" <color=#{Hex(col)}>{name} 회피!</color>");
                     SpawnFloating(e.TargetRuntimeId, "EVADE", col);
                     break;
                 }
                 case BattleEventType.ThornsReflected:
                 {
+                    var name = ResolveName(e.TargetRuntimeId);
                     var col = new Color(0.8f, 0.35f, 1f);
-                    AddLog($"  가시 → {e.TargetRuntimeId} <color=#{Hex(col)}>-{e.Value}</color>");
+                    AddLog($" 가시 반사 -> <color=#{Hex(col)}>{name} -{e.Value}</color>");
                     SpawnFloating(e.TargetRuntimeId, $"THORN -{e.Value}", col);
                     break;
                 }
                 case BattleEventType.CounterAttacked:
                 {
+                    var name = ResolveName(e.TargetRuntimeId);
                     var col = new Color(1f, 0.55f, 0.1f);
-                    AddLog($"  반격 → {e.TargetRuntimeId} <color=#{Hex(col)}>-{e.Value}</color>");
+                    AddLog($" 반격 -> <color=#{Hex(col)}>{name} -{e.Value}</color>");
                     SpawnFloating(e.TargetRuntimeId, $"반격 -{e.Value}", col);
                     break;
                 }
                 case BattleEventType.Died:
-                    AddLog($"  <color=#888888>{e.TargetRuntimeId} 사망</color>");
+                {
+                    var name = ResolveName(e.TargetRuntimeId);
+                    AddLog($" <color=#888888>{name} 사망</color>");
                     break;
+                }
                 case BattleEventType.ActiveSkillUsed:
                 {
-                    var tag = IsAlly(e.SourceRuntimeId) ? "<color=#33FF88>" : "<color=#FF5555>";
-                    AddLog($"{tag}{e.SourceRuntimeId} 스킬 발동!</color>");
+                    var name = ResolveName(e.SourceRuntimeId);
+                    var col = IsAlly(e.SourceRuntimeId) ? "#33FF88" : "#FF5555";
+                    AddLog($"<color={col}>{name} 스킬 발동!</color>");
                     break;
                 }
             }
+        }
+
+        private string ResolveName(string runtimeId)
+        {
+            if (nameResolver != null)
+            {
+                var name = nameResolver(runtimeId);
+                if (!string.IsNullOrWhiteSpace(name)) return name;
+            }
+            return runtimeId;
         }
 
         private void AddLog(string line)
         {
             logLines.Enqueue(line);
-            while (logLines.Count > MaxLogLines)
-            {
-                logLines.Dequeue();
-            }
-
+            while (logLines.Count > MaxLogLines) logLines.Dequeue();
             if (battleLogText != null)
-            {
                 battleLogText.text = string.Join("\n", logLines);
-            }
         }
 
         private void SpawnFloating(string runtimeId, string text, Color color)
         {
-            if (getWorldPos == null || overlayCanvas == null)
-            {
-                return;
-            }
-
+            if (getWorldPos == null || overlayCanvas == null) return;
             var worldPos = getWorldPos(runtimeId) + new Vector3(0f, 0.6f, 0f);
             FloatingText.Spawn(overlayCanvas, canvasRect, worldPos, text, color);
         }
@@ -396,7 +427,25 @@ namespace ProjectH.UI.Battle
             return $"{(int)(c.r * 255):X2}{(int)(c.g * 255):X2}{(int)(c.b * 255):X2}";
         }
 
-        private static Text CreateText(Transform parent, string value, int fontSize, TextAnchor anchor, Vector2 pos, Vector2 size)
+        private static GameObject CreatePanel(Transform parent, string objName, Color color)
+        {
+            var go = new GameObject(objName);
+            go.transform.SetParent(parent, false);
+            go.AddComponent<Image>().color = color;
+            go.AddComponent<RectTransform>();
+            return go;
+        }
+
+        private static void Stretch(RectTransform rect, float inset = 0f)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = new Vector2(inset, inset);
+            rect.offsetMax = new Vector2(-inset, -inset);
+        }
+
+        private static Text CreateText(Transform parent, string value, int fontSize,
+            TextAnchor anchor, Vector2 pos, Vector2 size)
         {
             var go = new GameObject("Text");
             go.transform.SetParent(parent, false);
@@ -411,24 +460,6 @@ namespace ProjectH.UI.Battle
             rect.sizeDelta = size;
             rect.anchoredPosition = pos;
             return text;
-        }
-
-        private static void CreateButton(Transform parent, string label, Vector2 pos, Vector2 size, Action onClick)
-        {
-            var go = new GameObject(label + "Button");
-            go.transform.SetParent(parent, false);
-            var image = go.AddComponent<Image>();
-            image.color = new Color(0.18f, 0.22f, 0.28f, 0.95f);
-            var button = go.AddComponent<Button>();
-            if (onClick != null)
-            {
-                button.onClick.AddListener(() => onClick());
-            }
-
-            var rect = go.GetComponent<RectTransform>();
-            rect.sizeDelta = size;
-            rect.anchoredPosition = pos;
-            CreateText(go.transform, label, 18, TextAnchor.MiddleCenter, Vector2.zero, size);
         }
     }
 }

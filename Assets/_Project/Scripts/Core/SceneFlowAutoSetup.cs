@@ -48,6 +48,12 @@ namespace ProjectH.Core
             if (key.Contains("dungeon") || key.Contains("던전"))
             {
                 EnsureController<DungeonSceneController>("DungeonSceneController");
+                return;
+            }
+
+            if (key.Contains("boot"))
+            {
+                EnsureController<BootLoader>("BootLoader");
             }
         }
 
