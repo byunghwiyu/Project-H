@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -262,24 +262,178 @@ namespace ProjectH.Data.Tables
 
     public readonly struct DropRow
     {
-        public DropRow(string monsterTemplateId, string itemId, string itemName, float dropRate)
+        public DropRow(
+            string monsterTemplateId,
+            string itemId,
+            string itemName,
+            float dropRate,
+            string equipType,
+            int grade,
+            int statValue)
         {
             MonsterTemplateId = monsterTemplateId;
             ItemId = itemId;
             ItemName = itemName;
             DropRate = dropRate;
+            EquipType = equipType;
+            Grade = grade;
+            StatValue = statValue;
         }
 
         public string MonsterTemplateId { get; }
         public string ItemId { get; }
         public string ItemName { get; }
         public float DropRate { get; }
+        public string EquipType { get; }
+        public int Grade { get; }
+        public int StatValue { get; }
+        public bool IsEquipment => !string.IsNullOrWhiteSpace(EquipType) && Grade > 0;
+    }
+
+    public readonly struct RecipeMaterialRequirement
+    {
+        public RecipeMaterialRequirement(string itemId, int amount)
+        {
+            ItemId = itemId;
+            Amount = amount;
+        }
+
+        public string ItemId { get; }
+        public int Amount { get; }
+        public bool IsValid => !string.IsNullOrWhiteSpace(ItemId) && Amount > 0;
+    }
+
+    public readonly struct RecipeRow
+    {
+        public RecipeRow(
+            string recipeId,
+            string resultEquipType,
+            int resultGrade,
+            int statValue,
+            int costCredits,
+            string material1ItemId,
+            int material1Amount,
+            string material2ItemId,
+            int material2Amount,
+            string material3ItemId,
+            int material3Amount,
+            string material4ItemId,
+            int material4Amount,
+            string material5ItemId,
+            int material5Amount,
+            int craftSeconds)
+        {
+            RecipeId = recipeId;
+            ResultEquipType = resultEquipType;
+            ResultGrade = resultGrade;
+            StatValue = statValue;
+            CostCredits = costCredits;
+            Material1ItemId = material1ItemId;
+            Material1Amount = material1Amount;
+            Material2ItemId = material2ItemId;
+            Material2Amount = material2Amount;
+            Material3ItemId = material3ItemId;
+            Material3Amount = material3Amount;
+            Material4ItemId = material4ItemId;
+            Material4Amount = material4Amount;
+            Material5ItemId = material5ItemId;
+            Material5Amount = material5Amount;
+            CraftSeconds = craftSeconds;
+        }
+
+        public string RecipeId { get; }
+        public string ResultEquipType { get; }
+        public int ResultGrade { get; }
+        public int StatValue { get; }
+        public int CostCredits { get; }
+        public string Material1ItemId { get; }
+        public int Material1Amount { get; }
+        public string Material2ItemId { get; }
+        public int Material2Amount { get; }
+        public string Material3ItemId { get; }
+        public int Material3Amount { get; }
+        public string Material4ItemId { get; }
+        public int Material4Amount { get; }
+        public string Material5ItemId { get; }
+        public int Material5Amount { get; }
+        public int CraftSeconds { get; }
+
+        public RecipeMaterialRequirement GetMaterialRequirement(int index)
+        {
+            switch (index)
+            {
+                case 1: return new RecipeMaterialRequirement(Material1ItemId, Material1Amount);
+                case 2: return new RecipeMaterialRequirement(Material2ItemId, Material2Amount);
+                case 3: return new RecipeMaterialRequirement(Material3ItemId, Material3Amount);
+                case 4: return new RecipeMaterialRequirement(Material4ItemId, Material4Amount);
+                case 5: return new RecipeMaterialRequirement(Material5ItemId, Material5Amount);
+                default: return default;
+            }
+        }
+
+        public IReadOnlyList<RecipeMaterialRequirement> GetMaterialRequirements()
+        {
+            var list = new List<RecipeMaterialRequirement>(5);
+            for (var i = 1; i <= 5; i++)
+            {
+                var requirement = GetMaterialRequirement(i);
+                if (requirement.IsValid)
+                {
+                    list.Add(requirement);
+                }
+            }
+
+            return list;
+        }
+    }
+
+    public readonly struct OfficeLevelRow
+    {
+        public OfficeLevelRow(int officeLevel, int offerResetSeconds, int minGrade, int maxGrade,
+            int offerCount, int rerollCostCredits, int upgradeCostCredits)
+        {
+            OfficeLevel = officeLevel;
+            OfferResetSeconds = offerResetSeconds;
+            MinGrade = minGrade;
+            MaxGrade = maxGrade;
+            OfferCount = offerCount;
+            RerollCostCredits = rerollCostCredits;
+            UpgradeCostCredits = upgradeCostCredits;
+        }
+
+        public int OfficeLevel { get; }
+        public int OfferResetSeconds { get; }
+        public int MinGrade { get; }
+        public int MaxGrade { get; }
+        public int OfferCount { get; }
+        public int RerollCostCredits { get; }
+        public int UpgradeCostCredits { get; }
+        public bool IsMaxLevel => UpgradeCostCredits <= 0;
+    }
+
+    public readonly struct BattlePositionRow
+    {
+        public BattlePositionRow(string locationId, string side, int slotIndex, float normX, float normY)
+        {
+            LocationId = locationId;
+            Side       = side;
+            SlotIndex  = slotIndex;
+            NormX      = normX;
+            NormY      = normY;
+        }
+
+        public string LocationId { get; }
+        public string Side       { get; }   // "ally" or "enemy"
+        public int    SlotIndex  { get; }
+        public float  NormX      { get; }   // viewport 0~1
+        public float  NormY      { get; }   // viewport 0~1
     }
 
     public sealed class GameCsvTables
     {
         private static readonly string[] RequiredTableNames =
         {
+            "battle_positions",
             "battle_setup",
             "characters",
             "combat_skills",
@@ -309,11 +463,17 @@ namespace ProjectH.Data.Tables
         private readonly Dictionary<string, StageRuleRow> stageRulesById;
         private readonly Dictionary<string, List<EncounterRow>> encountersByKey;
         private readonly Dictionary<string, List<DropRow>> dropsByTemplateId;
+        private readonly Dictionary<string, string> itemNameById;
         private readonly Dictionary<int, LevelCurveRow> levelCurveByLevel;
         private readonly int maxLevel;
         private readonly Dictionary<string, CharacterRow> characterRowsById;
+        private readonly List<RecipeRow> recipes;
         // Key: "gradeFrom::route" e.g. "1::A"
         private readonly Dictionary<string, PromotionRuleRow> promotionRulesByKey;
+        private readonly Dictionary<int, OfficeLevelRow> officeLevelRows;
+        private readonly int maxOfficeLevel;
+        // Key: "locationId::side" e.g. "SITE_ALPHA::ally"
+        private readonly Dictionary<string, List<BattlePositionRow>> battlePositionsByKey;
 
         private GameCsvTables(
             Dictionary<string, CombatUnitRow> combatUnitsById,
@@ -329,7 +489,10 @@ namespace ProjectH.Data.Tables
             Dictionary<string, List<DropRow>> dropsByTemplateId,
             Dictionary<int, LevelCurveRow> levelCurveByLevel,
             Dictionary<string, CharacterRow> characterRowsById,
-            Dictionary<string, PromotionRuleRow> promotionRulesByKey)
+            List<RecipeRow> recipes,
+            Dictionary<string, PromotionRuleRow> promotionRulesByKey,
+            Dictionary<int, OfficeLevelRow> officeLevelRows,
+            Dictionary<string, List<BattlePositionRow>> battlePositionsByKey)
         {
             this.combatUnitsById = combatUnitsById;
             this.battleSetupsById = battleSetupsById;
@@ -342,10 +505,15 @@ namespace ProjectH.Data.Tables
             this.stageRulesById = stageRulesById;
             this.encountersByKey = encountersByKey;
             this.dropsByTemplateId = dropsByTemplateId;
+            itemNameById = BuildItemNameIndex(dropsByTemplateId);
             this.levelCurveByLevel = levelCurveByLevel;
             maxLevel = levelCurveByLevel.Count > 0 ? levelCurveByLevel.Keys.Max() : 1;
             this.characterRowsById = characterRowsById;
+            this.recipes = recipes;
             this.promotionRulesByKey = promotionRulesByKey;
+            this.officeLevelRows = officeLevelRows;
+            maxOfficeLevel = officeLevelRows.Count > 0 ? officeLevelRows.Keys.Max() : 1;
+            this.battlePositionsByKey = battlePositionsByKey;
         }
 
         public static bool TryLoad(out GameCsvTables tables, out string error)
@@ -451,7 +619,25 @@ namespace ProjectH.Data.Tables
                 return false;
             }
 
-            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId, levelCurveByLevel, characterRowsById, promotionRulesByKey);
+            var recipes = BuildRecipes(loadedTables["recipes"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            var officeLevelRows = BuildOfficeLevels(loadedTables["office_level"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            var battlePositionsByKey = BuildBattlePositions(loadedTables["battle_positions"], out error);
+            if (!string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            tables = new GameCsvTables(combatUnitsById, battleSetupsById, firstBattleSetupId, recruitPoolById, locations, defineValues, waveRows, skillsByOwnerId, stageRulesById, encountersByKey, dropsByTemplateId, levelCurveByLevel, characterRowsById, recipes, promotionRulesByKey, officeLevelRows, battlePositionsByKey);
             return true;
         }
 
@@ -507,7 +693,12 @@ namespace ProjectH.Data.Tables
             return characterRowsById.TryGetValue(templateId ?? string.Empty, out row);
         }
 
-        /// <summary>route: "A" 또는 "B"</summary>
+        public IReadOnlyList<RecipeRow> GetRecipes()
+        {
+            return recipes.ToList();
+        }
+
+        /// <summary>route: "A" ?????"B"</summary>
         public bool TryGetPromotionRule(int gradeFrom, string route, out PromotionRuleRow row)
         {
             var key = $"{gradeFrom}::{(route ?? string.Empty).ToUpperInvariant()}";
@@ -515,6 +706,25 @@ namespace ProjectH.Data.Tables
         }
 
         public int GetMaxLevel() => maxLevel;
+
+        public bool TryGetOfficeLevelRow(int level, out OfficeLevelRow row)
+        {
+            return officeLevelRows.TryGetValue(level, out row);
+        }
+
+        public int GetMaxOfficeLevel() => maxOfficeLevel;
+
+        /// <summary>
+        /// 현장·진영에 해당하는 스폰 슬롯 목록을 slotIndex 오름차순으로 반환합니다.
+        /// side: "ally" 또는 "enemy"
+        /// </summary>
+        public IReadOnlyList<BattlePositionRow> GetBattleSlots(string locationId, string side)
+        {
+            var key = $"{locationId ?? string.Empty}::{(side ?? string.Empty).ToLowerInvariant()}";
+            return battlePositionsByKey.TryGetValue(key, out var list)
+                ? list
+                : System.Array.Empty<BattlePositionRow>();
+        }
 
         public int GetExpToNextLevel(int level)
         {
@@ -549,6 +759,33 @@ namespace ProjectH.Data.Tables
                 : System.Array.Empty<DropRow>();
         }
 
+        public string GetItemName(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return itemId;
+            }
+
+            return itemNameById.TryGetValue(itemId.Trim(), out var name) ? name : itemId;
+        }
+
+        private static Dictionary<string, string> BuildItemNameIndex(Dictionary<string, List<DropRow>> dropsByTemplateId)
+        {
+            var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var list in dropsByTemplateId.Values)
+            {
+                foreach (var row in list)
+                {
+                    if (!string.IsNullOrWhiteSpace(row.ItemId) && !string.IsNullOrWhiteSpace(row.ItemName))
+                    {
+                        index[row.ItemId] = row.ItemName;
+                    }
+                }
+            }
+
+            return index;
+        }
+
         public int GetDefineInt(string key, int fallback)
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -559,7 +796,8 @@ namespace ProjectH.Data.Tables
             return defineValues.TryGetValue(key.Trim(), out var v) ? v : fallback;
         }
 
-        public bool TryDrawRecruitOffers(string poolId, int overrideOfferCount, out List<CombatUnitRow> offers, out string error)
+        public bool TryDrawRecruitOffers(string poolId, int overrideOfferCount, int minGrade, int maxGrade,
+            out List<CombatUnitRow> offers, out string error)
         {
             offers = new List<CombatUnitRow>();
             error = string.Empty;
@@ -577,6 +815,30 @@ namespace ProjectH.Data.Tables
             }
 
             var candidates = new List<RecruitPoolEntry>(entries);
+
+            // Filter by grade if a valid range is provided
+            if (minGrade > 0 || maxGrade > 0)
+            {
+                candidates = candidates.Where(entry =>
+                {
+                    if (!characterRowsById.TryGetValue(entry.TemplateId, out var charRow))
+                    {
+                        return true; // keep unknown entries
+                    }
+
+                    var grade = charRow.Grade;
+                    var aboveMin = minGrade <= 0 || grade >= minGrade;
+                    var belowMax = maxGrade <= 0 || grade <= maxGrade;
+                    return aboveMin && belowMax;
+                }).ToList();
+            }
+
+            if (candidates.Count == 0)
+            {
+                error = $"No recruitable entries in grade range [{minGrade},{maxGrade}] for poolId={poolId}";
+                return false;
+            }
+
             var rng = new System.Random();
 
             while (offers.Count < offerCount && candidates.Count > 0)
@@ -925,6 +1187,46 @@ namespace ProjectH.Data.Tables
             return map;
         }
 
+        private static List<RecipeRow> BuildRecipes(CsvTable table, out string error)
+        {
+            var list = new List<RecipeRow>();
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var recipeId = Get(r, "recipeId");
+                var resultEquipType = Get(r, "resultEquipType");
+                var resultGrade = ParseInt(Get(r, "resultGrade"));
+                var statValue = ParseInt(Get(r, "statValue"));
+                var costCredits = ParseInt(Get(r, "costCredits"));
+                var material1ItemId = Get(r, "material1ItemId");
+                var material1Amount = ParseInt(Get(r, "material1Amount"));
+                var material2ItemId = Get(r, "material2ItemId");
+                var material2Amount = ParseInt(Get(r, "material2Amount"));
+                var material3ItemId = Get(r, "material3ItemId");
+                var material3Amount = ParseInt(Get(r, "material3Amount"));
+                var material4ItemId = Get(r, "material4ItemId");
+                var material4Amount = ParseInt(Get(r, "material4Amount"));
+                var material5ItemId = Get(r, "material5ItemId");
+                var material5Amount = ParseInt(Get(r, "material5Amount"));
+                var craftSeconds = ParseInt(Get(r, "craftSeconds"));
+
+                if (string.IsNullOrWhiteSpace(recipeId) || string.IsNullOrWhiteSpace(resultEquipType))
+                {
+                    continue;
+                }
+
+                list.Add(new RecipeRow(recipeId, resultEquipType, resultGrade, statValue, costCredits, material1ItemId, material1Amount, material2ItemId, material2Amount, material3ItemId, material3Amount, material4ItemId, material4Amount, material5ItemId, material5Amount, craftSeconds));
+            }
+
+            if (list.Count == 0)
+            {
+                error = "recipes.csv has no rows";
+            }
+
+            return list;
+        }
+
         private static Dictionary<string, PromotionRuleRow> BuildPromotionRules(CsvTable table, out string error)
         {
             var map = new Dictionary<string, PromotionRuleRow>(StringComparer.OrdinalIgnoreCase);
@@ -979,6 +1281,86 @@ namespace ProjectH.Data.Tables
             if (map.Count == 0)
             {
                 error = "level_curve.csv has no rows";
+            }
+
+            return map;
+        }
+
+        private static Dictionary<int, OfficeLevelRow> BuildOfficeLevels(CsvTable table, out string error)
+        {
+            var map = new Dictionary<int, OfficeLevelRow>();
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var officeLevel         = ParseInt(Get(r, "officeLevel"));
+                var offerResetSeconds   = ParseInt(Get(r, "offerResetSeconds"));
+                var minGrade            = ParseInt(Get(r, "minGrade"));
+                var maxGrade            = ParseInt(Get(r, "maxGrade"));
+                var offerCount          = ParseInt(Get(r, "offerCount"));
+                var rerollCostCredits   = ParseInt(Get(r, "rerollCostCredits"));
+                var upgradeCostCredits  = ParseInt(Get(r, "upgradeCostCredits"));
+
+                if (officeLevel <= 0)
+                {
+                    continue;
+                }
+
+                if (offerCount <= 0) offerCount = 3;
+                if (minGrade <= 0) minGrade = 1;
+                if (maxGrade <= 0) maxGrade = 99;
+
+                map[officeLevel] = new OfficeLevelRow(officeLevel, offerResetSeconds, minGrade, maxGrade,
+                    offerCount, rerollCostCredits, upgradeCostCredits);
+            }
+
+            if (map.Count == 0)
+            {
+                error = "office_level.csv has no rows";
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, List<BattlePositionRow>> BuildBattlePositions(
+            CsvTable table, out string error)
+        {
+            var map = new Dictionary<string, List<BattlePositionRow>>(StringComparer.OrdinalIgnoreCase);
+            error = string.Empty;
+
+            foreach (var r in table.Rows)
+            {
+                var locationId = Get(r, "locationId");
+                var side       = (Get(r, "side") ?? string.Empty).Trim().ToLowerInvariant();
+                var slotIndex  = ParseInt(Get(r, "slotIndex"));
+                var normX      = ParseFloat(Get(r, "normX"));
+                var normY      = ParseFloat(Get(r, "normY"));
+
+                if (string.IsNullOrWhiteSpace(locationId) || string.IsNullOrWhiteSpace(side))
+                {
+                    continue;
+                }
+
+                var key = $"{locationId.Trim()}::{side}";
+                if (!map.TryGetValue(key, out var list))
+                {
+                    list = new List<BattlePositionRow>();
+                    map[key] = list;
+                }
+
+                list.Add(new BattlePositionRow(locationId.Trim(), side, slotIndex,
+                    Mathf.Clamp01(normX), Mathf.Clamp01(normY)));
+            }
+
+            // slotIndex 오름차순 정렬
+            foreach (var list in map.Values)
+            {
+                list.Sort((a, b) => a.SlotIndex.CompareTo(b.SlotIndex));
+            }
+
+            if (map.Count == 0)
+            {
+                error = "battle_positions.csv has no rows";
             }
 
             return map;
@@ -1053,6 +1435,9 @@ namespace ProjectH.Data.Tables
                 var itemId            = Get(r, "itemId");
                 var itemName          = Get(r, "itemName");
                 var dropRate          = ParseFloat(Get(r, "dropRate"));
+                var equipType         = Get(r, "equipType");
+                var grade             = ParseInt(Get(r, "grade"));
+                var statValue         = ParseInt(Get(r, "statValue"));
 
                 if (string.IsNullOrWhiteSpace(monsterTemplateId) || string.IsNullOrWhiteSpace(itemId))
                 {
@@ -1065,7 +1450,7 @@ namespace ProjectH.Data.Tables
                     map[monsterTemplateId] = list;
                 }
 
-                list.Add(new DropRow(monsterTemplateId, itemId, itemName, dropRate));
+                list.Add(new DropRow(monsterTemplateId, itemId, itemName, dropRate, equipType, grade, statValue));
             }
 
             return map;

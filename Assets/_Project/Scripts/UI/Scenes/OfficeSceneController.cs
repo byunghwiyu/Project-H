@@ -1,409 +1,576 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ProjectH.Account;
 using ProjectH.Core;
 using ProjectH.Data.Tables;
 using UnityEngine;
 using UnityEngine.UI;
+using ProjectH.UI;
 
 namespace ProjectH.UI.Scenes
 {
     public sealed class OfficeSceneController : MonoBehaviour
     {
-        // ── 레이아웃 참조 ──────────────────────────────
-        private Transform mercListRoot;
-        private Text creditText;
+        private enum Tab { Mercs, Craft, Inventory }
 
-        // 상세 패널
-        private GameObject detailPanel;
-        private Text detailNameText;
-        private Text detailStatsText;
-        private Text detailExpText;
-        private Text detailPromotionStatus;
-        private Transform promotionButtonRoot;
+        // ── 공통 UI ──────────────────────────────────────────────────
+        private Text headerCreditsText;
+        private Text headerLevelText;
+        private Transform contentRoot;           // 콘텐츠 스크롤 부모
+        private Tab currentTab = Tab.Mercs;
 
-        // 현재 선택된 용병 templateId
-        private string selectedTemplateId;
+        // ── 탭 버튼 (활성 표시용) ─────────────────────────────────────
+        private Button tabMercsBtn;
+        private Button tabCraftBtn;
+        private Button tabInvBtn;
 
-        // 타이머 갱신용
-        private float timerRefreshElapsed;
-        private const float TimerRefreshInterval = 1f;
+        // ── 상세 오버레이 (용병 선택 시) ──────────────────────────────
+        private GameObject detailOverlay;
+        private Transform detailScrollRoot;
+        private string selectedMercenaryId;
+        private bool inventorySortByGrade = true;
 
-        // ── 라이프사이클 ──────────────────────────────
+        // ── 타이머 (제작/승급 갱신) ───────────────────────────────────
+        private float timerElapsed;
+        private const float TimerInterval = 1f;
 
         private void Start()
         {
             BuildUI();
-            RefreshList();
+            SwitchTab(Tab.Mercs);
         }
 
         private void Update()
         {
-            timerRefreshElapsed += Time.deltaTime;
-            if (timerRefreshElapsed >= TimerRefreshInterval)
+            timerElapsed += Time.deltaTime;
+            if (timerElapsed < TimerInterval) return;
+            timerElapsed = 0f;
+
+            // 크레딧 헤더 갱신
+            headerCreditsText.text = $"{PlayerAccountService.Credits}C";
+
+            // 오버레이 열려있고 승급 중이면 갱신
+            if (detailOverlay != null && detailOverlay.activeSelf &&
+                !string.IsNullOrEmpty(selectedMercenaryId) &&
+                PlayerAccountService.IsPromoting(selectedMercenaryId))
             {
-                timerRefreshElapsed = 0f;
-                if (!string.IsNullOrEmpty(selectedTemplateId) && PlayerAccountService.IsPromoting(selectedTemplateId))
-                {
-                    RefreshDetail(selectedTemplateId);
-                }
+                PopulateDetailOverlay(selectedMercenaryId);
+                return;
+            }
+
+            // 제작 탭이면 타이머 갱신
+            if (currentTab == Tab.Craft)
+            {
+                RefreshCurrentTab();
             }
         }
 
-        // ── UI 빌드 ──────────────────────────────────
+        // ── UI 빌드 ──────────────────────────────────────────────────
 
         private void BuildUI()
         {
-            var canvas = new GameObject("OfficeCanvas").AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.gameObject.AddComponent<CanvasScaler>();
-            canvas.gameObject.AddComponent<GraphicRaycaster>();
+            var t = UITheme.Instance;
+            var canvas = UIFactory.CreateCanvas("OfficeCanvas");
+            var root = UIFactory.CreateFullPanel(canvas.transform);
 
-            // 메인 패널
-            var panel = MakePanel(canvas.transform, Vector2.zero, new Vector2(880f, 660f), new Color(0.08f, 0.09f, 0.11f, 0.97f));
+            // ── 상단 바 ──────────────────────────────────────────────
+            var topBar = UIFactory.CreateTopBar(root);
 
-            // 제목
-            MakeText(panel, "사무실", 28, TextAnchor.UpperCenter, new Vector2(0f, 295f), new Vector2(840f, 48f));
+            UIFactory.CreateBarText(topBar, "사무소", TextRole.Heading,
+                TextAnchor.MiddleLeft, left: UIFactory.HorizPad, right: 700f);
 
-            // 크레딧 표시 (우상단)
-            creditText = MakeText(panel, "C: 0", 16, TextAnchor.UpperRight, new Vector2(400f, 285f), new Vector2(180f, 36f));
+            headerLevelText = UIFactory.CreateBarText(topBar, string.Empty, TextRole.Caption,
+                TextAnchor.MiddleCenter, left: 200f, right: 300f);
 
-            // ── 좌측: 용병 목록 ──
-            var listBG = MakePanel(panel, new Vector2(-220f, 20f), new Vector2(400f, 490f), new Color(0.05f, 0.06f, 0.08f, 1f));
-            MakeText(listBG.transform, "보유 용병", 16, TextAnchor.UpperCenter, new Vector2(0f, 218f), new Vector2(380f, 36f));
+            headerCreditsText = UIFactory.CreateBarText(topBar, "0C", TextRole.Caption,
+                TextAnchor.MiddleRight, left: 700f, right: 160f);
 
-            var listRoot = new GameObject("ListRoot");
-            listRoot.transform.SetParent(listBG.transform, false);
-            var listRect = listRoot.AddComponent<RectTransform>();
-            listRect.sizeDelta = new Vector2(380f, 420f);
-            listRect.anchoredPosition = new Vector2(0f, -10f);
-            var vLayout = listRoot.AddComponent<VerticalLayoutGroup>();
-            vLayout.spacing = 6f;
-            vLayout.childControlHeight = true;
-            vLayout.childControlWidth = true;
-            vLayout.childForceExpandHeight = false;
-            mercListRoot = listRoot.transform;
+            UIFactory.CreateButton(topBar, "↑",
+                new Vector2(-(UIFactory.HorizPad / 2f + 50f), 0f),
+                new Vector2(110f, 64f),
+                OnUpgradeOffice, ButtonVariant.Primary);
 
-            // ── 우측: 상세 패널 ──
-            detailPanel = new GameObject("DetailPanel");
-            detailPanel.transform.SetParent(panel, false);
-            var detailBG = detailPanel.AddComponent<Image>();
-            detailBG.color = new Color(0.05f, 0.06f, 0.08f, 1f);
-            var detailRect = detailPanel.GetComponent<RectTransform>();
-            detailRect.sizeDelta = new Vector2(420f, 490f);
-            detailRect.anchoredPosition = new Vector2(220f, 20f);
+            // ── 탭 바 ────────────────────────────────────────────────
+            var tabBar = UIFactory.CreateTabBar(root);
+            var tabRow = UIFactory.CreateHorizontalRow(tabBar, spacing: 2f);
+            tabMercsBtn = UIFactory.CreateNavButton(tabRow, "용병", () => SwitchTab(Tab.Mercs), ButtonVariant.Muted);
+            tabCraftBtn = UIFactory.CreateNavButton(tabRow, "제작", () => SwitchTab(Tab.Craft), ButtonVariant.Muted);
+            tabInvBtn   = UIFactory.CreateNavButton(tabRow, "인벤토리", () => SwitchTab(Tab.Inventory), ButtonVariant.Muted);
 
-            detailNameText  = MakeText(detailPanel.transform, "─ 용병을 선택하세요 ─", 17, TextAnchor.UpperCenter, new Vector2(0f, 210f), new Vector2(400f, 36f));
-            detailExpText   = MakeText(detailPanel.transform, string.Empty, 14, TextAnchor.UpperCenter, new Vector2(0f, 170f), new Vector2(400f, 28f));
-            detailStatsText = MakeText(detailPanel.transform, string.Empty, 13, TextAnchor.UpperLeft, new Vector2(-185f, 130f), new Vector2(395f, 120f));
+            // ── 콘텐츠 영역 ──────────────────────────────────────────
+            var contentArea = UIFactory.CreateContentArea(root,
+                topInset: UIFactory.TopBarH + UIFactory.TabBarH,
+                bottomInset: UIFactory.BottomNavH);
+            contentRoot = UIFactory.CreateScrollList(contentArea, spacing: 8f);
 
-            detailPromotionStatus = MakeText(detailPanel.transform, string.Empty, 14, TextAnchor.UpperCenter, new Vector2(0f, 0f), new Vector2(400f, 28f));
+            // ── 하단 내비 ────────────────────────────────────────────
+            var bottomBar = UIFactory.CreateBottomBar(root);
+            var navRow = UIFactory.CreateHorizontalRow(bottomBar, spacing: 4f);
+            UIFactory.CreateNavButton(navRow, "모집", () => SceneNavigator.TryLoad("Recruit"), ButtonVariant.Nav);
+            UIFactory.CreateNavButton(navRow, "현장", () => SceneNavigator.TryLoad("Dungeon"), ButtonVariant.Nav);
+            UIFactory.CreateNavButton(navRow, "새로고침", RefreshCurrentTab, ButtonVariant.Muted);
 
-            var promoRoot = new GameObject("PromoButtons");
-            promoRoot.transform.SetParent(detailPanel.transform, false);
-            var promoRect = promoRoot.AddComponent<RectTransform>();
-            promoRect.sizeDelta = new Vector2(400f, 180f);
-            promoRect.anchoredPosition = new Vector2(0f, -60f);
-            var promoLayout = promoRoot.AddComponent<VerticalLayoutGroup>();
-            promoLayout.spacing = 8f;
-            promoLayout.childControlHeight = true;
-            promoLayout.childControlWidth = true;
-            promoLayout.childForceExpandHeight = false;
-            promotionButtonRoot = promoRoot.transform;
+            // ── 상세 오버레이 ─────────────────────────────────────────
+            detailOverlay = BuildDetailOverlay(root);
+            detailOverlay.SetActive(false);
 
-            detailPanel.SetActive(false);
-
-            // ── 하단 버튼 ──
-            MakeButton(panel, "인력소", new Vector2(-280f, -288f), () => SceneNavigator.TryLoad("Recruit"));
-            MakeButton(panel, "현장", new Vector2(-70f, -288f), () => SceneNavigator.TryLoad("Dungeon"));
-            MakeButton(panel, "새로고침", new Vector2(160f, -288f), RefreshList);
+            RefreshHeader();
         }
 
-        // ── 목록 갱신 ─────────────────────────────────
-
-        private void RefreshList()
+        private void RefreshHeader()
         {
-            ClearChildren(mercListRoot);
+            headerCreditsText.text = $"{PlayerAccountService.Credits}C";
 
-            creditText.text = $"C: {PlayerAccountService.Credits}";
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            var lv = PlayerAccountService.GetOfficeLevel();
+            tables.TryGetOfficeLevelRow(lv, out var lvRow);
+            var maxLv = tables.GetMaxOfficeLevel();
+            headerLevelText.text = lvRow.IsMaxLevel
+                ? $"Lv.{lv} MAX"
+                : $"Lv.{lv}/{maxLv}  ↑{lvRow.UpgradeCostCredits}C";
+        }
 
-            var owned = PlayerAccountService.OwnedTemplateIds;
+        // ── 탭 전환 ──────────────────────────────────────────────────
+
+        private void SwitchTab(Tab tab)
+        {
+            currentTab = tab;
+            UpdateTabButtons();
+            RefreshCurrentTab();
+        }
+
+        private void UpdateTabButtons()
+        {
+            var t = UITheme.Instance;
+            SetTabColor(tabMercsBtn, currentTab == Tab.Mercs);
+            SetTabColor(tabCraftBtn, currentTab == Tab.Craft);
+            SetTabColor(tabInvBtn,   currentTab == Tab.Inventory);
+        }
+
+        private static void SetTabColor(Button btn, bool active)
+        {
+            if (btn == null) return;
+            btn.GetComponent<Image>().color = active
+                ? UITheme.Instance.primary
+                : UITheme.Instance.muted;
+        }
+
+        private void RefreshCurrentTab()
+        {
+            UIFactory.ClearChildren(contentRoot);
+            switch (currentTab)
+            {
+                case Tab.Mercs:     PopulateMercsTab();     break;
+                case Tab.Craft:     PopulateCraftTab();     break;
+                case Tab.Inventory: PopulateInventoryTab(); break;
+            }
+
+            if (contentRoot is RectTransform rt)
+                UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+
+            RefreshHeader();
+        }
+
+        // ── 용병 탭 ──────────────────────────────────────────────────
+
+        private void PopulateMercsTab()
+        {
+            var owned = PlayerAccountService.GetOwnedMercenaries();
             if (owned.Count == 0)
             {
-                MakeText(mercListRoot, "보유 용병 없음", 14, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(360f, 40f));
+                UIFactory.CreateListItem(contentRoot, "보유 용병 없음\n모집 탭에서 용병을 고용하세요.",
+                    92f, UITheme.Instance.muted);
                 return;
             }
 
-            if (!GameCsvTables.TryLoad(out var tables, out _))
-            {
-                return;
-            }
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            TalentCatalog.TryLoad(out var talents, out _);
 
-            foreach (var id in owned)
+            for (var i = 0; i < owned.Count; i++)
             {
-                var localId = id;
-                var label = BuildMercLabel(id, tables);
-                CreateMercButton(mercListRoot, label, () => SelectMerc(localId, tables));
+                var record = owned[i];
+                tables.TryGetCharacterRow(record.templateId, out var charRow);
+                var name    = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
+                var talent  = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
+                var promo   = PlayerAccountService.IsPromoting(record.mercenaryId) ? "  [승급중]" : string.Empty;
+                var label   = $"#{i + 1}  {name}  Lv.{record.level}  G{charRow.Grade}{promo}\n{talent}";
+
+                var bgColor = PlayerAccountService.IsPromoting(record.mercenaryId)
+                    ? UITheme.Instance.warning
+                    : UITheme.Instance.surfaceRaised;
+
+                var mercId = record.mercenaryId;
+                UIFactory.CreateListItem(contentRoot, label, 100f, bgColor,
+                    () => OpenDetailOverlay(mercId));
             }
         }
 
-        private static string BuildMercLabel(string templateId, GameCsvTables tables)
+        // ── 제작 탭 ──────────────────────────────────────────────────
+
+        private void PopulateCraftTab()
         {
-            var name = templateId;
-            var grade = 1;
-            if (tables.TryGetCharacterRow(templateId, out var charRow))
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+
+            // 재료 요약
+            var matSummary = BuildMaterialSummary(tables);
+            UIFactory.CreateActionItem(contentRoot, matSummary, 80f, UITheme.Instance.surface);
+
+            // 크레딧
+            UIFactory.CreateActionItem(contentRoot,
+                $"보유 크레딧: {PlayerAccountService.Credits}C", 60f, UITheme.Instance.surface);
+
+            // 레시피 목록
+            UIFactory.CreateActionItem(contentRoot, "── 제작 가능 ──", 50f, UITheme.Instance.surfaceBorder);
+            var recipes = tables.GetRecipes()
+                .Where(x => PlayerAccountService.IsSupportedEquipType(x.ResultEquipType))
+                .ToList();
+
+            if (recipes.Count == 0)
             {
-                name = charRow.Name;
-                grade = charRow.Grade;
-            }
-
-            var level = PlayerAccountService.GetLevel(templateId);
-            var promoting = PlayerAccountService.IsPromoting(templateId);
-            var suffix = promoting ? " [승급 중]" : string.Empty;
-            return $"★{grade} {name}  Lv.{level}{suffix}";
-        }
-
-        // ── 용병 선택 & 상세 ──────────────────────────
-
-        private void SelectMerc(string templateId, GameCsvTables tables)
-        {
-            selectedTemplateId = templateId;
-            RefreshDetail(templateId);
-            detailPanel.SetActive(true);
-        }
-
-        private void RefreshDetail(string templateId)
-        {
-            if (!GameCsvTables.TryLoad(out var tables, out _))
-            {
-                return;
-            }
-
-            // 이름/레벨/크레딧
-            var name = templateId;
-            var grade = 1;
-            if (tables.TryGetCharacterRow(templateId, out var charRow))
-            {
-                name = charRow.Name;
-                grade = charRow.Grade;
-            }
-
-            var level = PlayerAccountService.GetLevel(templateId);
-            var exp = PlayerAccountService.GetExp(templateId);
-            var expToNext = tables.GetExpToNextLevel(level);
-            detailNameText.text = $"{name}  ★{grade}  Lv.{level}";
-            detailExpText.text = $"EXP: {exp} / {expToNext}";
-
-            // 스탯
-            if (tables.TryGetCombatUnit(templateId, out var unitRow))
-            {
-                detailStatsText.text =
-                    $"HP:{unitRow.MaxHp}  MP:{unitRow.MaxMana}\n" +
-                    $"ATK:{unitRow.Attack}  DEF:{unitRow.Defense}  AGI:{unitRow.Agility}\n" +
-                    $"Type: {unitRow.DamageType} / {unitRow.AttackRangeType}";
+                UIFactory.CreateActionItem(contentRoot, "레시피 없음", 72f, UITheme.Instance.muted);
             }
             else
             {
-                detailStatsText.text = "(combat_units 데이터 없음)";
+                foreach (var recipe in recipes)
+                {
+                    var canStart = CraftingService.CanStartCraft(recipe, out _);
+                    var label    = BuildRecipeLabel(recipe, tables);
+                    var color    = canStart ? UITheme.Instance.success : UITheme.Instance.muted;
+                    UIFactory.CreateActionItem(contentRoot, label, 120f, color,
+                        canStart ? (Action)(() => OnStartCraft(recipe.RecipeId)) : null);
+                }
             }
 
-            // 승급 UI 갱신
-            ClearChildren(promotionButtonRoot);
-            BuildPromotionSection(templateId, grade, level, charRow, tables);
+            // 진행 중 작업
+            var jobs = CraftingService.GetJobs();
+            if (jobs.Count > 0)
+            {
+                UIFactory.CreateActionItem(contentRoot, "── 진행 중 ──", 50f, UITheme.Instance.surfaceBorder);
+                foreach (var job in jobs)
+                {
+                    var remaining = CraftingService.GetRemainingSeconds(job.jobId);
+                    var recipe    = tables.GetRecipes().FirstOrDefault(x => x.RecipeId == job.recipeId);
+                    var resultStr = string.IsNullOrWhiteSpace(recipe.RecipeId)
+                        ? job.recipeId
+                        : $"{recipe.ResultEquipType} G{recipe.ResultGrade} +{recipe.StatValue}";
+                    var label = remaining > 0
+                        ? $"{resultStr}\n{remaining / 60:D2}:{remaining % 60:D2} 남음"
+                        : $"{resultStr}\n[ 수령하기 ]";
+                    var color = remaining > 0 ? UITheme.Instance.warning : UITheme.Instance.success;
+                    var jobId = job.jobId;
+                    UIFactory.CreateActionItem(contentRoot, label, 100f, color,
+                        remaining > 0 ? null : (Action)(() => OnCompleteCraft(jobId)));
+                }
+            }
         }
 
-        private void BuildPromotionSection(
-            string templateId, int grade, int level,
+        // ── 인벤토리 탭 ──────────────────────────────────────────────
+
+        private void PopulateInventoryTab()
+        {
+            var sortLabel = inventorySortByGrade ? "정렬: 등급" : "정렬: 타입";
+            UIFactory.CreateActionItem(contentRoot, sortLabel, 64f, UITheme.Instance.surfaceBorder,
+                ToggleInventorySort);
+
+            var all = InventoryService.GetAllEquipments();
+            if (all.Count == 0)
+            {
+                UIFactory.CreateListItem(contentRoot, "보유 장비 없음", 92f, UITheme.Instance.muted);
+                return;
+            }
+
+            GameCsvTables.TryLoad(out var tables, out _);
+
+            IEnumerable<InventoryService.EquipmentRecord> sorted = inventorySortByGrade
+                ? all.OrderByDescending(x => x.grade).ThenBy(x => x.equipType).ThenByDescending(x => x.statValue)
+                : all.OrderBy(x => x.equipType).ThenByDescending(x => x.grade).ThenByDescending(x => x.statValue);
+
+            foreach (var eq in sorted)
+            {
+                var ownerLabel = BuildOwnerLabel(eq.ownerMercenaryId, tables);
+                var equippedMark = string.IsNullOrWhiteSpace(eq.ownerMercenaryId) ? "" : " [E]";
+                var label  = $"[{eq.equipType}] {FormatEquipLabel(eq)}{equippedMark}\n{ownerLabel}";
+                var tint   = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.4f);
+                UIFactory.CreateActionItem(contentRoot, label, 90f, tint);
+            }
+        }
+
+        private void ToggleInventorySort()
+        {
+            inventorySortByGrade = !inventorySortByGrade;
+            RefreshCurrentTab();
+        }
+
+        // ── 상세 오버레이 ─────────────────────────────────────────────
+
+        private GameObject BuildDetailOverlay(Transform root)
+        {
+            var t = UITheme.Instance;
+
+            var overlay = new GameObject("DetailOverlay");
+            overlay.transform.SetParent(root, false);
+            overlay.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.92f);
+            var overlayRect = overlay.GetComponent<RectTransform>();
+            overlayRect.anchorMin = Vector2.zero;
+            overlayRect.anchorMax = Vector2.one;
+            overlayRect.offsetMin = Vector2.zero;
+            overlayRect.offsetMax = Vector2.zero;
+
+            // 닫기 버튼 (우상단)
+            var closeBtn = new GameObject("CloseBtn");
+            closeBtn.transform.SetParent(overlay.transform, false);
+            closeBtn.AddComponent<Image>().color = t.danger;
+            var closeBtnComp = closeBtn.AddComponent<Button>();
+            closeBtnComp.onClick.AddListener(() => overlay.SetActive(false));
+            var closeBtnRect = closeBtn.GetComponent<RectTransform>();
+            closeBtnRect.anchorMin = new Vector2(1f, 1f);
+            closeBtnRect.anchorMax = new Vector2(1f, 1f);
+            closeBtnRect.pivot     = new Vector2(1f, 1f);
+            closeBtnRect.sizeDelta = new Vector2(120f, 80f);
+            closeBtnRect.anchoredPosition = Vector2.zero;
+            var closeTxt = new GameObject("Text");
+            closeTxt.transform.SetParent(closeBtn.transform, false);
+            var closeTxtComp = closeTxt.AddComponent<Text>();
+            closeTxtComp.text = "닫기";
+            closeTxtComp.font = t.GetFont();
+            closeTxtComp.fontSize = t.fontSizeBody;
+            closeTxtComp.alignment = TextAnchor.MiddleCenter;
+            closeTxtComp.color = t.textPrimary;
+            var closeTxtRect = closeTxt.GetComponent<RectTransform>();
+            closeTxtRect.anchorMin = Vector2.zero;
+            closeTxtRect.anchorMax = Vector2.one;
+            closeTxtRect.offsetMin = Vector2.zero;
+            closeTxtRect.offsetMax = Vector2.zero;
+
+            // 스크롤 콘텐츠
+            var contentArea = new GameObject("ContentArea");
+            contentArea.transform.SetParent(overlay.transform, false);
+            var contentRect = contentArea.AddComponent<RectTransform>();
+            contentRect.anchorMin = Vector2.zero;
+            contentRect.anchorMax = Vector2.one;
+            contentRect.offsetMin = Vector2.zero;
+            contentRect.offsetMax = new Vector2(-120f, -80f); // 닫기 버튼 피하기
+
+            detailScrollRoot = UIFactory.CreateScrollList(contentArea.transform, spacing: 8f);
+            return overlay;
+        }
+
+        private void OpenDetailOverlay(string mercenaryId)
+        {
+            selectedMercenaryId = mercenaryId;
+            detailOverlay.SetActive(true);
+            PopulateDetailOverlay(mercenaryId);
+        }
+
+        private void PopulateDetailOverlay(string mercenaryId)
+        {
+            UIFactory.ClearChildren(detailScrollRoot);
+
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            TalentCatalog.TryLoad(out var talents, out _);
+
+            var record = PlayerAccountService.GetRecordByMercenaryId(mercenaryId);
+            if (record == null) return;
+
+            tables.TryGetCharacterRow(record.templateId, out var charRow);
+            var name = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
+
+            // 이름 / 등급 / 레벨
+            var expToNext = tables.GetExpToNextLevel(record.level);
+            UIFactory.CreateActionItem(detailScrollRoot,
+                $"{name}  G{charRow.Grade}  Lv.{record.level}\nEXP {record.exp} / {expToNext}",
+                110f, UITheme.Instance.surface);
+
+            // 재능
+            var talentName = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
+            var talentDesc = talents != null ? talents.GetTalentDescription(record.talentTag) : string.Empty;
+            UIFactory.CreateActionItem(detailScrollRoot,
+                $"재능: {talentName}\n{talentDesc}",
+                100f, UITheme.Instance.surfaceRaised);
+
+            // 스탯
+            if (tables.TryGetCombatUnit(record.templateId, out var unitRow))
+            {
+                UIFactory.CreateActionItem(detailScrollRoot,
+                    $"HP {unitRow.MaxHp}  MP {unitRow.MaxMana}\n" +
+                    $"ATK {unitRow.Attack}  DEF {unitRow.Defense}  AGI {unitRow.Agility}\n" +
+                    $"{unitRow.DamageType} / {unitRow.AttackRangeType}",
+                    120f, UITheme.Instance.surfaceRaised);
+            }
+
+            // ── 장비 슬롯 ──────────────────────────────────────────
+            UIFactory.CreateActionItem(detailScrollRoot, "── 장비 ──", 50f, UITheme.Instance.surfaceBorder);
+            BuildEquipSection(record, "weapon",    "무기");
+            BuildEquipSection(record, "armor",     "방어구");
+            BuildEquipSection(record, "accessory", "장신구");
+            BuildEquipSection(record, "extra",     "특수");
+
+            // ── 승급 ───────────────────────────────────────────────
+            UIFactory.CreateActionItem(detailScrollRoot, "── 승급 ──", 50f, UITheme.Instance.surfaceBorder);
+            BuildPromotionSection(record, charRow, tables);
+        }
+
+        private void BuildEquipSection(PlayerAccountService.MercenaryRecord record,
+            string equipType, string label)
+        {
+            var equippedId = PlayerAccountService.GetEquippedItemId(record.mercenaryId, equipType);
+
+            if (!string.IsNullOrWhiteSpace(equippedId) &&
+                InventoryService.TryGetEquipment(equippedId, out var equipped))
+            {
+                UIFactory.CreateActionItem(detailScrollRoot,
+                    $"{label}: {FormatEquipLabel(equipped)}  [해제]",
+                    80f, UITheme.Instance.danger,
+                    () => { InventoryService.TryUnequip(equipped.equipmentId, out _); PopulateDetailOverlay(record.mercenaryId); });
+            }
+            else
+            {
+                UIFactory.CreateActionItem(detailScrollRoot,
+                    $"{label}: (빈 슬롯)", 72f, UITheme.Instance.surface);
+            }
+
+            foreach (var eq in InventoryService.GetUnequippedEquipments(equipType).Take(3))
+            {
+                var tint = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.45f);
+                var eqId = eq.equipmentId;
+                var mercId = record.mercenaryId;
+                UIFactory.CreateActionItem(detailScrollRoot,
+                    $"장착: {FormatEquipLabel(eq)}",
+                    80f, tint,
+                    () => { InventoryService.TryEquip(eqId, mercId, out _); PopulateDetailOverlay(mercId); });
+            }
+        }
+
+        private void BuildPromotionSection(PlayerAccountService.MercenaryRecord record,
             CharacterRow charRow, GameCsvTables tables)
         {
-            // 이미 승급 진행 중
-            if (PlayerAccountService.IsPromoting(templateId))
+            if (PlayerAccountService.IsPromoting(record.mercenaryId))
             {
-                var remaining = PlayerAccountService.GetPromotionRemainingSeconds(templateId);
+                var remaining = PlayerAccountService.GetPromotionRemainingSeconds(record.mercenaryId);
                 if (remaining > 0)
                 {
-                    var mins = remaining / 60;
-                    var secs = remaining % 60;
-                    detailPromotionStatus.text = $"승급 진행 중  남은 시간: {mins:D2}:{secs:D2}";
+                    UIFactory.CreateActionItem(detailScrollRoot,
+                        $"승급 진행중: {remaining / 60:D2}:{remaining % 60:D2}", 72f, UITheme.Instance.warning);
                 }
                 else
                 {
-                    detailPromotionStatus.text = "승급 완료! 확인 버튼을 눌러주세요.";
-                    var localId = templateId;
-                    CreatePromoButton(promotionButtonRoot, "✓ 승급 확인", new Color(0.2f, 0.7f, 0.3f), () => OnConfirmPromotion(localId));
+                    UIFactory.CreateActionItem(detailScrollRoot, "승급 완료 — 수령하기", 80f,
+                        UITheme.Instance.success,
+                        () => { PlayerAccountService.TryCompletePromotion(record.mercenaryId, out _);
+                                PopulateDetailOverlay(record.mercenaryId); });
                 }
+
                 return;
             }
 
-            detailPromotionStatus.text = string.Empty;
+            BuildRouteButton(record, charRow, tables, "A", charRow.PromotionRouteA);
+            BuildRouteButton(record, charRow, tables, "B", charRow.PromotionRouteB);
 
-            // Route A / B 버튼 생성
-            BuildRouteButton(templateId, grade, level, "A", charRow.PromotionRouteA, tables);
-            BuildRouteButton(templateId, grade, level, "B", charRow.PromotionRouteB, tables);
-
-            if (string.IsNullOrEmpty(charRow.PromotionRouteA) && string.IsNullOrEmpty(charRow.PromotionRouteB))
+            if (string.IsNullOrEmpty(charRow.PromotionRouteA) &&
+                string.IsNullOrEmpty(charRow.PromotionRouteB))
             {
-                detailPromotionStatus.text = "(승급 경로 없음)";
+                UIFactory.CreateActionItem(detailScrollRoot, "(승급 루트 없음)", 60f, UITheme.Instance.muted);
             }
         }
 
-        private void BuildRouteButton(
-            string templateId, int grade, int level,
-            string route, string targetId, GameCsvTables tables)
+        private void BuildRouteButton(PlayerAccountService.MercenaryRecord record,
+            CharacterRow charRow, GameCsvTables tables, string route, string targetId)
         {
-            if (string.IsNullOrEmpty(targetId))
-            {
-                return;
-            }
+            if (string.IsNullOrEmpty(targetId) ||
+                !tables.TryGetPromotionRule(charRow.Grade, route, out var rule)) return;
 
-            if (!tables.TryGetPromotionRule(grade, route, out var rule))
-            {
-                return;
-            }
-
-            var targetName = targetId;
-            if (tables.TryGetCharacterRow(targetId, out var targetChar))
-            {
-                targetName = targetChar.Name;
-            }
-
-            var canLevel = level >= rule.RequiredLevel;
-            var canAfford = PlayerAccountService.Credits >= rule.CostCredits;
+            tables.TryGetCharacterRow(targetId, out var targetChar);
+            var targetName = string.IsNullOrWhiteSpace(targetChar.Name) ? targetId : targetChar.Name;
+            var canLevel   = record.level >= rule.RequiredLevel;
+            var canAfford  = PlayerAccountService.Credits >= rule.CostCredits;
             var canPromote = canLevel && canAfford;
-
-            var labelColor = canPromote ? Color.white : new Color(0.5f, 0.5f, 0.5f);
-            var btnColor = canPromote ? new Color(0.2f, 0.3f, 0.5f) : new Color(0.15f, 0.15f, 0.2f);
-
-            var timeMin = rule.TimeSeconds / 60;
-            var timeSec = rule.TimeSeconds % 60;
-            var label = $"Route {route}: {targetName}\n  Lv.{rule.RequiredLevel}↑  {timeMin:D2}:{timeSec:D2}  {rule.CostCredits}C";
-
-            if (!canLevel)  label += "  (레벨 부족)";
-            if (!canAfford) label += "  (크레딧 부족)";
-
-            var localTemplate = templateId;
-            var localTarget = targetId;
-            var localRule = rule;
-
-            var btn = CreatePromoButton(promotionButtonRoot, label, btnColor,
-                canPromote
-                    ? (Action)(() => OnStartPromotion(localTemplate, localTarget, localRule))
-                    : null);
-
-            var btnText = btn.GetComponentInChildren<Text>();
-            if (btnText != null) btnText.color = labelColor;
+            var label = $"루트 {route}: {targetName}\n" +
+                        $"Lv.{rule.RequiredLevel}+  {rule.CostCredits}C  " +
+                        $"{rule.TimeSeconds / 60:D2}:{rule.TimeSeconds % 60:D2}" +
+                        (!canLevel ? "  [레벨 부족]" : "") +
+                        (!canAfford ? "  [크레딧 부족]" : "");
+            var color = canPromote ? UITheme.Instance.primary : UITheme.Instance.muted;
+            var mercId = record.mercenaryId;
+            UIFactory.CreateActionItem(detailScrollRoot, label, 100f, color,
+                canPromote ? (Action)(() =>
+                {
+                    PlayerAccountService.StartPromotion(mercId, targetId, rule.TimeSeconds, rule.CostCredits);
+                    PopulateDetailOverlay(mercId);
+                }) : null);
         }
 
-        // ── 승급 액션 ─────────────────────────────────
+        // ── 이벤트 핸들러 ────────────────────────────────────────────
 
-        private void OnStartPromotion(string templateId, string targetTemplateId, PromotionRuleRow rule)
+        private void OnUpgradeOffice()
         {
-            var success = PlayerAccountService.StartPromotion(
-                templateId, targetTemplateId, rule.TimeSeconds, rule.CostCredits);
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            PlayerAccountService.TryUpgradeOffice(tables, out _);
+            RefreshHeader();
+        }
 
-            if (!success)
+        private void OnStartCraft(string recipeId)
+        {
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            var recipe = tables.GetRecipes().FirstOrDefault(x => x.RecipeId == recipeId);
+            if (string.IsNullOrWhiteSpace(recipe.RecipeId)) return;
+            CraftingService.TryStartCraft(recipe, out _);
+            RefreshCurrentTab();
+        }
+
+        private void OnCompleteCraft(string jobId)
+        {
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            CraftingService.TryCompleteCraft(jobId, tables, out _, out _);
+            RefreshCurrentTab();
+        }
+
+        // ── 포맷 헬퍼 ────────────────────────────────────────────────
+
+        private static string FormatEquipLabel(InventoryService.EquipmentRecord eq)
+        {
+            if (eq == null) return "(null)";
+            var tier = eq.grade switch
             {
-                Debug.LogWarning($"[office] StartPromotion failed: {templateId} → {targetTemplateId}");
-                return;
-            }
-
-            Debug.Log($"[office] 승급 시작: {templateId} → {targetTemplateId} ({rule.TimeSeconds}초 / {rule.CostCredits}C)");
-            creditText.text = $"C: {PlayerAccountService.Credits}";
-            RefreshList();
-            RefreshDetail(templateId);
+                1 => "Normal", 2 => "Rare", 3 => "Elite",
+                4 => "Epic",   5 => "Legend", _ => $"G{eq.grade}"
+            };
+            return $"[{tier}] {eq.itemName} +{eq.statValue}";
         }
 
-        private void OnConfirmPromotion(string templateId)
+        private static string BuildOwnerLabel(string ownerMercenaryId, GameCsvTables tables)
         {
-            if (!PlayerAccountService.TryCompletePromotion(templateId, out var newId))
+            if (string.IsNullOrWhiteSpace(ownerMercenaryId)) return "(미장착)";
+            if (tables == null) return $"착용: {ownerMercenaryId}";
+            var record = PlayerAccountService.GetRecordByMercenaryId(ownerMercenaryId);
+            if (record == null) return $"착용: {ownerMercenaryId}";
+            tables.TryGetCharacterRow(record.templateId, out var charRow);
+            var name = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
+            return $"착용: {name} Lv.{record.level}";
+        }
+
+        private static string BuildMaterialSummary(GameCsvTables tables)
+        {
+            var mats = InventoryService.GetAllMaterials();
+            if (mats.Count == 0) return "재료: 없음";
+            var top = mats.OrderByDescending(x => x.amount).Take(5)
+                .Select(x => $"{tables.GetItemName(x.itemId)}: {x.amount}");
+            return "재료: " + string.Join("  ", top);
+        }
+
+        private static string BuildRecipeLabel(RecipeRow recipe, GameCsvTables tables)
+        {
+            var header = $"{recipe.ResultEquipType} G{recipe.ResultGrade} +{recipe.StatValue}" +
+                         $"  {recipe.CostCredits}C  {recipe.CraftSeconds}s";
+            var mats = recipe.GetMaterialRequirements();
+            if (mats.Count == 0) return header;
+            var parts = mats.Select(x =>
             {
-                Debug.LogWarning($"[office] TryCompletePromotion failed: {templateId}");
-                return;
-            }
-
-            Debug.Log($"[office] 승급 완료: {templateId} → {newId}");
-            selectedTemplateId = newId;
-            RefreshList();
-            RefreshDetail(newId);
-        }
-
-        // ── UI 헬퍼 ──────────────────────────────────
-
-        private void CreateMercButton(Transform parent, string label, Action onClick)
-        {
-            var go = new GameObject("MercBtn");
-            go.transform.SetParent(parent, false);
-            go.AddComponent<Image>().color = new Color(0.14f, 0.18f, 0.24f, 1f);
-            var btn = go.AddComponent<Button>();
-            btn.onClick.AddListener(() => onClick?.Invoke());
-            var le = go.AddComponent<LayoutElement>();
-            le.preferredHeight = 48f;
-            var txt = MakeText(go.transform, label, 14, TextAnchor.MiddleLeft, new Vector2(8f, 0f), new Vector2(350f, 44f));
-            txt.color = Color.white;
-        }
-
-        private static GameObject CreatePromoButton(Transform parent, string label, Color bgColor, Action onClick)
-        {
-            var go = new GameObject("PromoBtn");
-            go.transform.SetParent(parent, false);
-            go.AddComponent<Image>().color = bgColor;
-            var btn = go.AddComponent<Button>();
-            if (onClick != null) btn.onClick.AddListener(() => onClick());
-            var le = go.AddComponent<LayoutElement>();
-            le.preferredHeight = 58f;
-            MakeText(go.transform, label, 13, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(390f, 54f));
-            return go;
-        }
-
-        private static RectTransform MakePanel(Transform parent, Vector2 pos, Vector2 size, Color color)
-        {
-            var go = new GameObject("Panel");
-            go.transform.SetParent(parent, false);
-            go.AddComponent<Image>().color = color;
-            var r = go.GetComponent<RectTransform>();
-            r.sizeDelta = size;
-            r.anchoredPosition = pos;
-            return r;
-        }
-
-        private static Text MakeText(Transform parent, string value, int fontSize,
-            TextAnchor anchor, Vector2 pos, Vector2 size)
-        {
-            var go = new GameObject("Text");
-            go.transform.SetParent(parent, false);
-            var t = go.AddComponent<Text>();
-            t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            t.fontSize = fontSize;
-            t.alignment = anchor;
-            t.color = Color.white;
-            t.text = value;
-            var r = t.GetComponent<RectTransform>();
-            r.sizeDelta = size;
-            r.anchoredPosition = pos;
-            return t;
-        }
-
-        private static void MakeButton(Transform parent, string label, Vector2 pos, Action onClick)
-        {
-            var go = new GameObject(label + "Btn");
-            go.transform.SetParent(parent, false);
-            go.AddComponent<Image>().color = new Color(0.17f, 0.24f, 0.33f, 1f);
-            var btn = go.AddComponent<Button>();
-            btn.onClick.AddListener(() => onClick?.Invoke());
-            var r = go.GetComponent<RectTransform>();
-            r.sizeDelta = new Vector2(190f, 44f);
-            r.anchoredPosition = pos;
-            MakeText(go.transform, label, 17, TextAnchor.MiddleCenter, Vector2.zero, r.sizeDelta);
-        }
-
-        private static void ClearChildren(Transform parent)
-        {
-            if (parent == null) return;
-            for (var i = parent.childCount - 1; i >= 0; i--)
-            {
-                var c = parent.GetChild(i);
-                if (c != null) Destroy(c.gameObject);
-            }
+                var name = tables.GetItemName(x.ItemId);
+                var have = InventoryService.GetMaterialAmount(x.ItemId);
+                return $"{(have >= x.Amount ? "✓" : "✗")}{name} x{x.Amount}({have})";
+            });
+            return $"{header}\n{string.Join("  ", parts)}";
         }
     }
 }

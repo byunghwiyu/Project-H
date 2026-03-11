@@ -1,0 +1,40 @@
+# battle_positions.csv
+# locationId: 현장 ID
+# side: ally(아군) or enemy(적군)
+# slotIndex: 슬롯 우선순위 (0부터, 낮을수록 먼저 사용)
+# normX, normY: 뷰포트 정규화 좌표 (0~1), Camera.ViewportToWorldPoint로 변환
+# 유닛 수 < 슬롯 수 → 슬롯 중 랜덤 선택
+# 유닛 수 > 슬롯 수 → 슬롯 순서 반복(wrap)
+locationId,side,slotIndex,normX,normY
+SITE_ALPHA,ally,0,0.28,0.62
+SITE_ALPHA,ally,1,0.28,0.47
+SITE_ALPHA,ally,2,0.12,0.62
+SITE_ALPHA,ally,3,0.12,0.47
+SITE_ALPHA,enemy,0,0.72,0.62
+SITE_ALPHA,enemy,1,0.72,0.47
+SITE_ALPHA,enemy,2,0.88,0.62
+SITE_ALPHA,enemy,3,0.88,0.47
+SITE_BRAVO,ally,0,0.28,0.62
+SITE_BRAVO,ally,1,0.28,0.47
+SITE_BRAVO,ally,2,0.12,0.62
+SITE_BRAVO,ally,3,0.12,0.47
+SITE_BRAVO,enemy,0,0.72,0.62
+SITE_BRAVO,enemy,1,0.72,0.47
+SITE_BRAVO,enemy,2,0.88,0.62
+SITE_BRAVO,enemy,3,0.88,0.47
+SITE_CHARLIE,ally,0,0.28,0.62
+SITE_CHARLIE,ally,1,0.28,0.47
+SITE_CHARLIE,ally,2,0.12,0.62
+SITE_CHARLIE,ally,3,0.12,0.47
+SITE_CHARLIE,enemy,0,0.72,0.62
+SITE_CHARLIE,enemy,1,0.72,0.47
+SITE_CHARLIE,enemy,2,0.88,0.62
+SITE_CHARLIE,enemy,3,0.88,0.47
+SITE_DELTA,ally,0,0.28,0.62
+SITE_DELTA,ally,1,0.28,0.47
+SITE_DELTA,ally,2,0.12,0.62
+SITE_DELTA,ally,3,0.12,0.47
+SITE_DELTA,enemy,0,0.72,0.62
+SITE_DELTA,enemy,1,0.72,0.47
+SITE_DELTA,enemy,2,0.88,0.62
+SITE_DELTA,enemy,3,0.88,0.47

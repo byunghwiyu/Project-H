@@ -7,13 +7,12 @@ namespace ProjectH.Battle
 {
     public static class DropResolver
     {
-        /// <summary>사망한 적 templateId 목록을 기반으로 드랍 아이템 목록을 반환합니다.</summary>
-        public static List<string> Resolve(
+        public static List<DropRow> Resolve(
             IEnumerable<string> killedTemplateIds,
             GameCsvTables tables,
             System.Random rng)
         {
-            var dropped = new List<string>();
+            var dropped = new List<DropRow>();
             foreach (var templateId in killedTemplateIds)
             {
                 var drops = tables.GetDropRows(templateId);
@@ -21,8 +20,8 @@ namespace ProjectH.Battle
                 {
                     if (rng.NextDouble() < drop.DropRate)
                     {
-                        dropped.Add(drop.ItemId);
-                        Debug.Log($"[drop] {templateId} → {drop.ItemId} ({drop.ItemName})");
+                        dropped.Add(drop);
+                        Debug.Log($"[drop] {templateId} -> {drop.ItemId} ({drop.ItemName})");
                     }
                 }
             }

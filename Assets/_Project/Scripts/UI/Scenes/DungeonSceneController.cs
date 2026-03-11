@@ -1,279 +1,228 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using ProjectH.Account;
 using ProjectH.Core;
 using ProjectH.Data.Tables;
 using UnityEngine;
 using UnityEngine.UI;
+using ProjectH.UI;
 
 namespace ProjectH.UI.Scenes
 {
     public sealed class DungeonSceneController : MonoBehaviour
     {
         private Text statusText;
-        private Transform dungeonListRoot;
-        private GameObject popup;
-        private Transform popupListRoot;
-        private Text popupTitle;
-
+        private Transform fieldListRoot;
+        private GameObject dispatchOverlay;
+        private Transform partyListRoot;
+        private Text overlayTitle;
+        private Text overlayStatus;
         private string selectedLocationId;
         private readonly List<string> selectedAllies = new List<string>();
         private int maxPartySize = 4;
 
         private void Start()
         {
-            BuildUi();
-            RefreshDungeons();
+            BuildUI();
+            RefreshFields();
         }
 
-        private void BuildUi()
+        private void BuildUI()
         {
-            var canvas = new GameObject("DungeonCanvas").AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.gameObject.AddComponent<CanvasScaler>();
-            canvas.gameObject.AddComponent<GraphicRaycaster>();
+            var t = UITheme.Instance;
+            var canvas = UIFactory.CreateCanvas("DungeonCanvas");
+            var root = UIFactory.CreateFullPanel(canvas.transform);
 
-            var panel = new GameObject("Panel");
-            panel.transform.SetParent(canvas.transform, false);
-            var panelImage = panel.AddComponent<Image>();
-            panelImage.color = new Color(0.08f, 0.09f, 0.11f, 0.95f);
-            var panelRect = panel.GetComponent<RectTransform>();
-            panelRect.anchorMin = new Vector2(0.5f, 0.5f);
-            panelRect.anchorMax = new Vector2(0.5f, 0.5f);
-            panelRect.sizeDelta = new Vector2(860f, 650f);
+            // ── 상단 바 ──────────────────────────────────────────────
+            var topBar = UIFactory.CreateTopBar(root);
 
-            CreateText(panel.transform, "던전 파견", 30, TextAnchor.UpperCenter, new Vector2(0f, 290f), new Vector2(780f, 60f));
-            statusText = CreateText(panel.transform, string.Empty, 18, TextAnchor.UpperLeft, new Vector2(0f, 240f), new Vector2(780f, 50f));
+            UIFactory.CreateBarText(topBar, "현장 선택", TextRole.Heading,
+                TextAnchor.MiddleLeft, left: UIFactory.HorizPad, right: 400f);
 
-            var listObj = new GameObject("DungeonList");
-            listObj.transform.SetParent(panel.transform, false);
-            dungeonListRoot = listObj.transform;
-            var listRect = listObj.AddComponent<RectTransform>();
-            listRect.sizeDelta = new Vector2(780f, 390f);
-            listRect.anchoredPosition = new Vector2(0f, 20f);
-            var layout = listObj.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 10f;
-            layout.childControlHeight = true;
-            layout.childControlWidth = true;
-            layout.childForceExpandHeight = false;
+            statusText = UIFactory.CreateBarText(topBar, string.Empty, TextRole.Caption,
+                TextAnchor.MiddleRight, left: 500f, right: UIFactory.HorizPad);
 
-            CreateButton(panel.transform, "용병 모집", new Vector2(-260f, -280f), () => SceneNavigator.TryLoad("Recruit"));
-            CreateButton(panel.transform, "사무실", new Vector2(0f, -280f), () => SceneNavigator.TryLoad("Office"));
-            CreateButton(panel.transform, "새로고침", new Vector2(260f, -280f), RefreshDungeons);
+            // ── 콘텐츠 ───────────────────────────────────────────────
+            var contentArea = UIFactory.CreateContentArea(root);
+            fieldListRoot = UIFactory.CreateScrollList(contentArea, spacing: 10f);
 
-            popup = CreatePopup(panel.transform);
-            popup.SetActive(false);
+            // ── 하단 내비 ────────────────────────────────────────────
+            var bottomBar = UIFactory.CreateBottomBar(root);
+            var navRow = UIFactory.CreateHorizontalRow(bottomBar, spacing: 4f);
+            UIFactory.CreateNavButton(navRow, "모집", () => SceneNavigator.TryLoad("Recruit"), ButtonVariant.Nav);
+            UIFactory.CreateNavButton(navRow, "사무소", () => SceneNavigator.TryLoad("Office"), ButtonVariant.Nav);
+            UIFactory.CreateNavButton(navRow, "새로고침", RefreshFields, ButtonVariant.Muted);
+
+            // ── 파견 오버레이 ─────────────────────────────────────────
+            dispatchOverlay = BuildDispatchOverlay(root);
+            dispatchOverlay.SetActive(false);
         }
 
-        private void RefreshDungeons()
+        private void RefreshFields()
         {
-            if (dungeonListRoot == null)
-            {
-                BuildUi();
-            }
-
-            ClearChildrenSafe(dungeonListRoot);
+            UIFactory.ClearChildren(fieldListRoot);
 
             if (!GameCsvTables.TryLoad(out var tables, out var error))
             {
-                statusText.text = $"테이블 로드 실패: {error}";
+                statusText.text = $"로드 실패";
                 return;
             }
 
             maxPartySize = Mathf.Max(1, tables.GetDefineInt("maxPartySize", 4));
+            statusText.text = $"{PlayerAccountService.Credits}C";
 
             var open = tables.GetOpenLocations();
             if (open.Count == 0)
             {
-                statusText.text = "오픈된 던전이 없습니다.";
+                UIFactory.CreateListItem(fieldListRoot, "개방된 현장 없음", 92f, UITheme.Instance.muted);
                 return;
             }
 
-            statusText.text = "던전을 선택하고 파견 인원을 지정하세요.";
             foreach (var loc in open)
             {
-                var label = $"{loc.Name} ({loc.LocationId})";
-                CreateListButton(dungeonListRoot, label, () => OpenDispatchPopup(loc.LocationId, loc.Name));
+                UIFactory.CreateListItem(fieldListRoot,
+                    $"{loc.Name}\n{loc.LocationId}", 110f,
+                    UITheme.Instance.surfaceRaised,
+                    () => OpenDispatch(loc.LocationId, loc.Name));
             }
         }
 
-        private void OpenDispatchPopup(string locationId, string locationName)
+        private void OpenDispatch(string locationId, string locationName)
         {
             selectedLocationId = locationId;
             selectedAllies.Clear();
+            overlayTitle.text   = locationName;
+            overlayStatus.text  = $"최대 {maxPartySize}명 선택";
+            UIFactory.ClearChildren(partyListRoot);
+            dispatchOverlay.SetActive(true);
 
-            popupTitle.text = $"{locationName} 파견 인원 선택 (최대 {maxPartySize})";
-            popup.SetActive(true);
+            if (!GameCsvTables.TryLoad(out var tables, out _)) return;
+            TalentCatalog.TryLoad(out var talents, out _);
 
-            ClearChildrenSafe(popupListRoot);
-
-            if (!GameCsvTables.TryLoad(out var tables, out var error))
-            {
-                statusText.text = $"테이블 로드 실패: {error}";
-                return;
-            }
-
-            var owned = PlayerAccountService.OwnedTemplateIds;
+            var owned = PlayerAccountService.GetOwnedMercenaries();
             if (owned.Count == 0)
             {
-                statusText.text = "보유 용병이 없습니다. Recruit 씬에서 고용하세요.";
+                UIFactory.CreateListItem(partyListRoot, "보유 용병 없음", 92f, UITheme.Instance.muted);
                 return;
             }
 
-            foreach (var id in owned)
+            for (var i = 0; i < owned.Count; i++)
             {
-                var label = id;
-                if (tables.TryGetCombatUnit(id, out var row))
-                {
-                    label = $"{row.Name} ({row.EntityId})";
-                }
-
-                CreateSelectableButton(popupListRoot, label, id);
+                var record = owned[i];
+                tables.TryGetCharacterRow(record.templateId, out var charRow);
+                var name   = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
+                var talent = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
+                BuildSelectableEntry(partyListRoot, $"#{i + 1}  {name}  Lv.{record.level}\n{talent}",
+                    record.mercenaryId);
             }
         }
 
-        private void CreateSelectableButton(Transform parent, string label, string templateId)
+        private void BuildSelectableEntry(Transform parent, string label, string mercenaryId)
         {
-            var btnObj = new GameObject("MercButton");
-            btnObj.transform.SetParent(parent, false);
-            var image = btnObj.AddComponent<Image>();
-            image.color = new Color(0.18f, 0.2f, 0.24f, 1f);
-            var button = btnObj.AddComponent<Button>();
-            var layout = btnObj.AddComponent<LayoutElement>();
-            layout.preferredHeight = 48f;
-
-            var text = CreateText(btnObj.transform, "[ ] " + label, 16, TextAnchor.MiddleLeft, Vector2.zero, new Vector2(640f, 44f));
-            text.GetComponent<RectTransform>().anchoredPosition = new Vector2(10f, 0f);
-
-            button.onClick.AddListener(() =>
+            var t = UITheme.Instance;
+            var (go, lbl) = UIFactory.CreateListItem(parent, "[ ] " + label, 100f, t.surfaceRaised);
+            var img = go.GetComponent<Image>();
+            var btn = go.GetComponent<Button>();
+            btn.onClick.AddListener(() =>
             {
-                if (selectedAllies.Contains(templateId))
+                if (selectedAllies.Contains(mercenaryId))
                 {
-                    selectedAllies.Remove(templateId);
-                    text.text = "[ ] " + label;
-                    return;
+                    selectedAllies.Remove(mercenaryId);
+                    lbl.text  = "[ ] " + label;
+                    img.color = t.surfaceRaised;
+                }
+                else
+                {
+                    if (selectedAllies.Count >= maxPartySize)
+                    {
+                        overlayStatus.text = $"최대 {maxPartySize}명 초과";
+                        return;
+                    }
+
+                    selectedAllies.Add(mercenaryId);
+                    lbl.text  = "[✓] " + label;
+                    img.color = t.success;
                 }
 
-                if (selectedAllies.Count >= maxPartySize)
-                {
-                    statusText.text = $"최대 파견 인원은 {maxPartySize}명입니다.";
-                    return;
-                }
-
-                selectedAllies.Add(templateId);
-                text.text = "[선택] " + label;
+                overlayStatus.text = $"{selectedAllies.Count} / {maxPartySize} 선택";
             });
         }
 
-        private GameObject CreatePopup(Transform parent)
+        private GameObject BuildDispatchOverlay(Transform root)
         {
-            var go = new GameObject("DispatchPopup");
-            go.transform.SetParent(parent, false);
-            var image = go.AddComponent<Image>();
-            image.color = new Color(0f, 0f, 0f, 0.92f);
-            var rect = go.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(720f, 520f);
-            rect.anchoredPosition = new Vector2(0f, 0f);
+            var t = UITheme.Instance;
 
-            popupTitle = CreateText(go.transform, "파견 인원 선택", 24, TextAnchor.UpperCenter, new Vector2(0f, 220f), new Vector2(680f, 50f));
+            var overlay = new GameObject("DispatchOverlay");
+            overlay.transform.SetParent(root, false);
+            overlay.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.88f);
+            var overlayRect = overlay.GetComponent<RectTransform>();
+            overlayRect.anchorMin = Vector2.zero;
+            overlayRect.anchorMax = Vector2.one;
+            overlayRect.offsetMin = Vector2.zero;
+            overlayRect.offsetMax = Vector2.zero;
 
-            var listObj = new GameObject("PopupList");
-            listObj.transform.SetParent(go.transform, false);
-            popupListRoot = listObj.transform;
-            var listRect = listObj.AddComponent<RectTransform>();
-            listRect.sizeDelta = new Vector2(680f, 330f);
-            listRect.anchoredPosition = new Vector2(0f, 20f);
-            var layout = listObj.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 8f;
-            layout.childControlHeight = true;
-            layout.childControlWidth = true;
-            layout.childForceExpandHeight = false;
+            // 카드
+            var card = new GameObject("Card");
+            card.transform.SetParent(overlay.transform, false);
+            card.AddComponent<Image>().color = t.surface;
+            var cardRect = card.GetComponent<RectTransform>();
+            cardRect.anchorMin = new Vector2(0f, 0f);
+            cardRect.anchorMax = new Vector2(1f, 1f);
+            cardRect.offsetMin = new Vector2(24f, UIFactory.BottomNavH + 24f);
+            cardRect.offsetMax = new Vector2(-24f, -(UIFactory.TopBarH + 24f));
 
-            CreateButton(go.transform, "파견 시작", new Vector2(-140f, -220f), OnConfirmDispatch);
-            CreateButton(go.transform, "닫기", new Vector2(140f, -220f), () => go.SetActive(false));
-            return go;
+            // 제목 바
+            var titleBar = new GameObject("TitleBar");
+            titleBar.transform.SetParent(card.transform, false);
+            titleBar.AddComponent<Image>().color = t.surfaceBorder;
+            var titleRect = titleBar.GetComponent<RectTransform>();
+            titleRect.anchorMin = new Vector2(0f, 1f);
+            titleRect.anchorMax = new Vector2(1f, 1f);
+            titleRect.pivot     = new Vector2(0.5f, 1f);
+            titleRect.offsetMin = new Vector2(0f, -100f);
+            titleRect.offsetMax = Vector2.zero;
+
+            overlayTitle = UIFactory.CreateText(titleBar.transform, "파견 편성", TextRole.Heading,
+                TextAnchor.MiddleLeft, new Vector2(UIFactory.HorizPad + 10f, 0f), new Vector2(560f, 100f));
+
+            overlayStatus = UIFactory.CreateText(titleBar.transform, string.Empty, TextRole.Caption,
+                TextAnchor.MiddleRight, new Vector2(-(UIFactory.HorizPad + 10f), 0f), new Vector2(280f, 100f));
+
+            // 리스트 영역
+            var listArea = new GameObject("ListArea");
+            listArea.transform.SetParent(card.transform, false);
+            var listRect = listArea.AddComponent<RectTransform>();
+            listRect.anchorMin = Vector2.zero;
+            listRect.anchorMax = Vector2.one;
+            listRect.offsetMin = new Vector2(0f, 110f);
+            listRect.offsetMax = new Vector2(0f, -100f);
+            partyListRoot = UIFactory.CreateScrollList(listArea.transform, spacing: 8f);
+
+            // 버튼 바
+            var btnBar = new GameObject("BtnBar");
+            btnBar.transform.SetParent(card.transform, false);
+            var btnRect = btnBar.AddComponent<RectTransform>();
+            btnRect.anchorMin = new Vector2(0f, 0f);
+            btnRect.anchorMax = new Vector2(1f, 0f);
+            btnRect.pivot     = new Vector2(0.5f, 0f);
+            btnRect.offsetMin = Vector2.zero;
+            btnRect.offsetMax = new Vector2(0f, 110f);
+            var btnRow = UIFactory.CreateHorizontalRow(btnBar.transform, spacing: 8f);
+            UIFactory.CreateNavButton(btnRow, "파견 확정", OnConfirmDispatch, ButtonVariant.Success);
+            UIFactory.CreateNavButton(btnRow, "닫기", () => overlay.SetActive(false), ButtonVariant.Muted);
+
+            return overlay;
         }
 
         private void OnConfirmDispatch()
         {
-            if (string.IsNullOrWhiteSpace(selectedLocationId))
+            if (string.IsNullOrWhiteSpace(selectedLocationId) || selectedAllies.Count == 0)
             {
-                statusText.text = "던전을 먼저 선택하세요.";
-                return;
-            }
-
-            if (selectedAllies.Count == 0)
-            {
-                statusText.text = "최소 1명의 용병을 선택하세요.";
+                overlayStatus.text = "현장 또는 용병을 선택하세요.";
                 return;
             }
 
             PlayerAccountService.SetDispatch(selectedLocationId, 1, selectedAllies);
             SceneNavigator.TryLoad("Battle");
-        }
-
-        private static Text CreateText(Transform parent, string value, int fontSize, TextAnchor anchor, Vector2 pos, Vector2 size)
-        {
-            var go = new GameObject("Text");
-            go.transform.SetParent(parent, false);
-            var text = go.AddComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            text.fontSize = fontSize;
-            text.alignment = anchor;
-            text.color = Color.white;
-            text.text = value;
-            var rect = text.GetComponent<RectTransform>();
-            rect.sizeDelta = size;
-            rect.anchoredPosition = pos;
-            return text;
-        }
-
-        private static void CreateButton(Transform parent, string label, Vector2 pos, UnityEngine.Events.UnityAction onClick)
-        {
-            var go = new GameObject(label + "Button");
-            go.transform.SetParent(parent, false);
-            var image = go.AddComponent<Image>();
-            image.color = new Color(0.17f, 0.24f, 0.33f, 1f);
-            var button = go.AddComponent<Button>();
-            button.onClick.AddListener(onClick);
-
-            var rect = go.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(220f, 44f);
-            rect.anchoredPosition = pos;
-
-            var text = CreateText(go.transform, label, 18, TextAnchor.MiddleCenter, Vector2.zero, rect.sizeDelta);
-            text.color = Color.white;
-        }
-
-        private static void CreateListButton(Transform parent, string label, UnityEngine.Events.UnityAction onClick)
-        {
-            var go = new GameObject("DungeonButton");
-            go.transform.SetParent(parent, false);
-            var image = go.AddComponent<Image>();
-            image.color = new Color(0.16f, 0.2f, 0.27f, 1f);
-            var button = go.AddComponent<Button>();
-            button.onClick.AddListener(onClick);
-            var layout = go.AddComponent<LayoutElement>();
-            layout.preferredHeight = 52f;
-
-            var text = CreateText(go.transform, label, 17, TextAnchor.MiddleLeft, Vector2.zero, new Vector2(740f, 46f));
-            text.GetComponent<RectTransform>().anchoredPosition = new Vector2(10f, 0f);
-        }
-
-        private static void ClearChildrenSafe(Transform parent)
-        {
-            if (parent == null)
-            {
-                return;
-            }
-
-            for (var i = parent.childCount - 1; i >= 0; i--)
-            {
-                var child = parent.GetChild(i);
-                if (child != null)
-                {
-                    Destroy(child.gameObject);
-                }
-            }
         }
     }
 }

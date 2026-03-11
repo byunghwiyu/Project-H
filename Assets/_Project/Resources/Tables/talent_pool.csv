@@ -1,0 +1,7 @@
+roleTag,talentTag,weight
+tank,NONE,80
+tank,BOOKWORM,20
+dps,NONE,75
+dps,BOOKWORM,25
+support,NONE,55
+support,BOOKWORM,45

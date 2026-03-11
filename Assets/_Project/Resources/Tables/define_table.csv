@@ -11,3 +11,5 @@ maxPartySize,4,전장 투입 가능 인원
 teamSlotCount,4,팀 편성 창의 슬롯 개수
 talentAssignChance,0.35,유닛 고용 시 재능 할당률
 startingCredits,500,신규 플레이어 초기 지급 크레딧
+dispatchWaveCount,5,파견 1회 클리어 목표 웨이브 수
+creditsPerWave,80,웨이브 클리어 시 지급 크레딧

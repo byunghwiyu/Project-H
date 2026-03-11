@@ -7,7 +7,9 @@ namespace ProjectH.Data
     [Serializable]
     public struct BattleUnitDefinition
     {
+        public string mercenaryId;
         public string templateId;
+        public string talentTag;
         public string displayName;
         public BattleStatBlock statBlock;
         public string prefabResourcePath;
