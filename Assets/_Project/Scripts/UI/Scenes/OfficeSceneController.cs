@@ -4,6 +4,7 @@ using System.Linq;
 using ProjectH.Account;
 using ProjectH.Core;
 using ProjectH.Data.Tables;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using ProjectH.UI;
@@ -15,29 +16,47 @@ namespace ProjectH.UI.Scenes
         private enum Tab { Mercs, Craft, Inventory }
 
         // ── 공통 UI ──────────────────────────────────────────────────
-        private Text headerCreditsText;
-        private Text headerLevelText;
-        private Transform contentRoot;           // 콘텐츠 스크롤 부모
+        [SerializeField] private TMP_Text headerCreditsText;
+        [SerializeField] private TMP_Text headerLevelText;
+        [SerializeField] private Transform contentRoot;
+        [SerializeField] private Button upgradeBtn;
+
+        // ── 탭 버튼 ───────────────────────────────────────────────────
+        [SerializeField] private Button tabMercsBtn;
+        [SerializeField] private Button tabCraftBtn;
+        [SerializeField] private Button tabInvBtn;
+
+        // ── 상세 오버레이 ──────────────────────────────────────────────
+        [SerializeField] private GameObject detailOverlay;
+        [SerializeField] private Transform detailScrollRoot;
+        [SerializeField] private Button detailCloseBtn;
+
+        // ── 하단 내비 ─────────────────────────────────────────────────
+        [SerializeField] private Button recruitNavBtn;
+        [SerializeField] private Button dungeonNavBtn;
+        [SerializeField] private Button refreshNavBtn;
+
+        // ── 프리팹 ────────────────────────────────────────────────────
+        [SerializeField] private ListItemBinding listItemCardPrefab;
+        [SerializeField] private ActionCardBinding actionCardPrefab;
+
         private Tab currentTab = Tab.Mercs;
-
-        // ── 탭 버튼 (활성 표시용) ─────────────────────────────────────
-        private Button tabMercsBtn;
-        private Button tabCraftBtn;
-        private Button tabInvBtn;
-
-        // ── 상세 오버레이 (용병 선택 시) ──────────────────────────────
-        private GameObject detailOverlay;
-        private Transform detailScrollRoot;
         private string selectedMercenaryId;
         private bool inventorySortByGrade = true;
 
-        // ── 타이머 (제작/승급 갱신) ───────────────────────────────────
         private float timerElapsed;
         private const float TimerInterval = 1f;
 
         private void Start()
         {
-            BuildUI();
+            tabMercsBtn.onClick.AddListener(() => SwitchTab(Tab.Mercs));
+            tabCraftBtn.onClick.AddListener(() => SwitchTab(Tab.Craft));
+            tabInvBtn.onClick.AddListener(() => SwitchTab(Tab.Inventory));
+            detailCloseBtn.onClick.AddListener(() => detailOverlay.SetActive(false));
+            upgradeBtn.onClick.AddListener(OnUpgradeOffice);
+            recruitNavBtn.onClick.AddListener(() => SceneNavigator.TryLoad("Recruit"));
+            dungeonNavBtn.onClick.AddListener(() => SceneNavigator.TryLoad("Dungeon"));
+            refreshNavBtn.onClick.AddListener(RefreshCurrentTab);
             SwitchTab(Tab.Mercs);
         }
 
@@ -47,10 +66,8 @@ namespace ProjectH.UI.Scenes
             if (timerElapsed < TimerInterval) return;
             timerElapsed = 0f;
 
-            // 크레딧 헤더 갱신
             headerCreditsText.text = $"{PlayerAccountService.Credits}C";
 
-            // 오버레이 열려있고 승급 중이면 갱신
             if (detailOverlay != null && detailOverlay.activeSelf &&
                 !string.IsNullOrEmpty(selectedMercenaryId) &&
                 PlayerAccountService.IsPromoting(selectedMercenaryId))
@@ -59,64 +76,13 @@ namespace ProjectH.UI.Scenes
                 return;
             }
 
-            // 제작 탭이면 타이머 갱신
             if (currentTab == Tab.Craft)
             {
                 RefreshCurrentTab();
             }
         }
 
-        // ── UI 빌드 ──────────────────────────────────────────────────
-
-        private void BuildUI()
-        {
-            var t = UITheme.Instance;
-            var canvas = UIFactory.CreateCanvas("OfficeCanvas");
-            var root = UIFactory.CreateFullPanel(canvas.transform);
-
-            // ── 상단 바 ──────────────────────────────────────────────
-            var topBar = UIFactory.CreateTopBar(root);
-
-            UIFactory.CreateBarText(topBar, "사무소", TextRole.Heading,
-                TextAnchor.MiddleLeft, left: UIFactory.HorizPad, right: 700f);
-
-            headerLevelText = UIFactory.CreateBarText(topBar, string.Empty, TextRole.Caption,
-                TextAnchor.MiddleCenter, left: 200f, right: 300f);
-
-            headerCreditsText = UIFactory.CreateBarText(topBar, "0C", TextRole.Caption,
-                TextAnchor.MiddleRight, left: 700f, right: 160f);
-
-            UIFactory.CreateButton(topBar, "↑",
-                new Vector2(-(UIFactory.HorizPad / 2f + 50f), 0f),
-                new Vector2(110f, 64f),
-                OnUpgradeOffice, ButtonVariant.Primary);
-
-            // ── 탭 바 ────────────────────────────────────────────────
-            var tabBar = UIFactory.CreateTabBar(root);
-            var tabRow = UIFactory.CreateHorizontalRow(tabBar, spacing: 2f);
-            tabMercsBtn = UIFactory.CreateNavButton(tabRow, "용병", () => SwitchTab(Tab.Mercs), ButtonVariant.Muted);
-            tabCraftBtn = UIFactory.CreateNavButton(tabRow, "제작", () => SwitchTab(Tab.Craft), ButtonVariant.Muted);
-            tabInvBtn   = UIFactory.CreateNavButton(tabRow, "인벤토리", () => SwitchTab(Tab.Inventory), ButtonVariant.Muted);
-
-            // ── 콘텐츠 영역 ──────────────────────────────────────────
-            var contentArea = UIFactory.CreateContentArea(root,
-                topInset: UIFactory.TopBarH + UIFactory.TabBarH,
-                bottomInset: UIFactory.BottomNavH);
-            contentRoot = UIFactory.CreateScrollList(contentArea, spacing: 8f);
-
-            // ── 하단 내비 ────────────────────────────────────────────
-            var bottomBar = UIFactory.CreateBottomBar(root);
-            var navRow = UIFactory.CreateHorizontalRow(bottomBar, spacing: 4f);
-            UIFactory.CreateNavButton(navRow, "모집", () => SceneNavigator.TryLoad("Recruit"), ButtonVariant.Nav);
-            UIFactory.CreateNavButton(navRow, "현장", () => SceneNavigator.TryLoad("Dungeon"), ButtonVariant.Nav);
-            UIFactory.CreateNavButton(navRow, "새로고침", RefreshCurrentTab, ButtonVariant.Muted);
-
-            // ── 상세 오버레이 ─────────────────────────────────────────
-            detailOverlay = BuildDetailOverlay(root);
-            detailOverlay.SetActive(false);
-
-            RefreshHeader();
-        }
+        // ── 헤더 갱신 ────────────────────────────────────────────────
 
         private void RefreshHeader()
         {
@@ -142,7 +108,6 @@ namespace ProjectH.UI.Scenes
 
         private void UpdateTabButtons()
         {
-            var t = UITheme.Instance;
             SetTabColor(tabMercsBtn, currentTab == Tab.Mercs);
             SetTabColor(tabCraftBtn, currentTab == Tab.Craft);
             SetTabColor(tabInvBtn,   currentTab == Tab.Inventory);
@@ -167,7 +132,7 @@ namespace ProjectH.UI.Scenes
             }
 
             if (contentRoot is RectTransform rt)
-                UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
 
             RefreshHeader();
         }
@@ -179,8 +144,8 @@ namespace ProjectH.UI.Scenes
             var owned = PlayerAccountService.GetOwnedMercenaries();
             if (owned.Count == 0)
             {
-                UIFactory.CreateListItem(contentRoot, "보유 용병 없음\n모집 탭에서 용병을 고용하세요.",
-                    92f, UITheme.Instance.muted);
+                Instantiate(listItemCardPrefab, contentRoot)
+                    .Set("보유 용병 없음\n모집 탭에서 용병을 고용하세요.", UITheme.Instance.muted, null, 92f);
                 return;
             }
 
@@ -191,18 +156,16 @@ namespace ProjectH.UI.Scenes
             {
                 var record = owned[i];
                 tables.TryGetCharacterRow(record.templateId, out var charRow);
-                var name    = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
-                var talent  = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
-                var promo   = PlayerAccountService.IsPromoting(record.mercenaryId) ? "  [승급중]" : string.Empty;
-                var label   = $"#{i + 1}  {name}  Lv.{record.level}  G{charRow.Grade}{promo}\n{talent}";
-
+                var name   = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
+                var talent = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
+                var promo  = PlayerAccountService.IsPromoting(record.mercenaryId) ? "  [승급중]" : string.Empty;
+                var label  = $"#{i + 1}  {name}  Lv.{record.level}  G{charRow.Grade}{promo}\n{talent}";
                 var bgColor = PlayerAccountService.IsPromoting(record.mercenaryId)
                     ? UITheme.Instance.warning
                     : UITheme.Instance.surfaceRaised;
-
                 var mercId = record.mercenaryId;
-                UIFactory.CreateListItem(contentRoot, label, 100f, bgColor,
-                    () => OpenDetailOverlay(mercId));
+                Instantiate(listItemCardPrefab, contentRoot)
+                    .Set(label, bgColor, () => OpenDetailOverlay(mercId), 100f);
             }
         }
 
@@ -212,23 +175,22 @@ namespace ProjectH.UI.Scenes
         {
             if (!GameCsvTables.TryLoad(out var tables, out _)) return;
 
-            // 재료 요약
-            var matSummary = BuildMaterialSummary(tables);
-            UIFactory.CreateActionItem(contentRoot, matSummary, 80f, UITheme.Instance.surface);
+            Instantiate(actionCardPrefab, contentRoot)
+                .Set(BuildMaterialSummary(tables), UITheme.Instance.surface, null, 80f);
+            Instantiate(actionCardPrefab, contentRoot)
+                .Set($"보유 크레딧: {PlayerAccountService.Credits}C", UITheme.Instance.surface, null, 60f);
 
-            // 크레딧
-            UIFactory.CreateActionItem(contentRoot,
-                $"보유 크레딧: {PlayerAccountService.Credits}C", 60f, UITheme.Instance.surface);
+            Instantiate(actionCardPrefab, contentRoot)
+                .Set("── 제작 가능 ──", UITheme.Instance.surfaceBorder, null, 50f);
 
-            // 레시피 목록
-            UIFactory.CreateActionItem(contentRoot, "── 제작 가능 ──", 50f, UITheme.Instance.surfaceBorder);
             var recipes = tables.GetRecipes()
                 .Where(x => PlayerAccountService.IsSupportedEquipType(x.ResultEquipType))
                 .ToList();
 
             if (recipes.Count == 0)
             {
-                UIFactory.CreateActionItem(contentRoot, "레시피 없음", 72f, UITheme.Instance.muted);
+                Instantiate(actionCardPrefab, contentRoot)
+                    .Set("레시피 없음", UITheme.Instance.muted, null, 72f);
             }
             else
             {
@@ -237,16 +199,17 @@ namespace ProjectH.UI.Scenes
                     var canStart = CraftingService.CanStartCraft(recipe, out _);
                     var label    = BuildRecipeLabel(recipe, tables);
                     var color    = canStart ? UITheme.Instance.success : UITheme.Instance.muted;
-                    UIFactory.CreateActionItem(contentRoot, label, 120f, color,
-                        canStart ? (Action)(() => OnStartCraft(recipe.RecipeId)) : null);
+                    var r        = recipe;
+                    Instantiate(actionCardPrefab, contentRoot)
+                        .Set(label, color, canStart ? (Action)(() => OnStartCraft(r.RecipeId)) : null, 120f);
                 }
             }
 
-            // 진행 중 작업
             var jobs = CraftingService.GetJobs();
             if (jobs.Count > 0)
             {
-                UIFactory.CreateActionItem(contentRoot, "── 진행 중 ──", 50f, UITheme.Instance.surfaceBorder);
+                Instantiate(actionCardPrefab, contentRoot)
+                    .Set("── 진행 중 ──", UITheme.Instance.surfaceBorder, null, 50f);
                 foreach (var job in jobs)
                 {
                     var remaining = CraftingService.GetRemainingSeconds(job.jobId);
@@ -259,8 +222,9 @@ namespace ProjectH.UI.Scenes
                         : $"{resultStr}\n[ 수령하기 ]";
                     var color = remaining > 0 ? UITheme.Instance.warning : UITheme.Instance.success;
                     var jobId = job.jobId;
-                    UIFactory.CreateActionItem(contentRoot, label, 100f, color,
-                        remaining > 0 ? null : (Action)(() => OnCompleteCraft(jobId)));
+                    Instantiate(actionCardPrefab, contentRoot)
+                        .Set(label, color,
+                            remaining > 0 ? null : (Action)(() => OnCompleteCraft(jobId)), 100f);
                 }
             }
         }
@@ -270,13 +234,14 @@ namespace ProjectH.UI.Scenes
         private void PopulateInventoryTab()
         {
             var sortLabel = inventorySortByGrade ? "정렬: 등급" : "정렬: 타입";
-            UIFactory.CreateActionItem(contentRoot, sortLabel, 64f, UITheme.Instance.surfaceBorder,
-                ToggleInventorySort);
+            Instantiate(actionCardPrefab, contentRoot)
+                .Set(sortLabel, UITheme.Instance.surfaceBorder, ToggleInventorySort, 64f);
 
             var all = InventoryService.GetAllEquipments();
             if (all.Count == 0)
             {
-                UIFactory.CreateListItem(contentRoot, "보유 장비 없음", 92f, UITheme.Instance.muted);
+                Instantiate(listItemCardPrefab, contentRoot)
+                    .Set("보유 장비 없음", UITheme.Instance.muted, null, 92f);
                 return;
             }
 
@@ -288,11 +253,11 @@ namespace ProjectH.UI.Scenes
 
             foreach (var eq in sorted)
             {
-                var ownerLabel = BuildOwnerLabel(eq.ownerMercenaryId, tables);
+                var ownerLabel   = BuildOwnerLabel(eq.ownerMercenaryId, tables);
                 var equippedMark = string.IsNullOrWhiteSpace(eq.ownerMercenaryId) ? "" : " [E]";
-                var label  = $"[{eq.equipType}] {FormatEquipLabel(eq)}{equippedMark}\n{ownerLabel}";
-                var tint   = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.4f);
-                UIFactory.CreateActionItem(contentRoot, label, 90f, tint);
+                var label        = $"[{eq.equipType}] {FormatEquipLabel(eq)}{equippedMark}\n{ownerLabel}";
+                var tint         = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.4f);
+                Instantiate(actionCardPrefab, contentRoot).Set(label, tint, null, 90f);
             }
         }
 
@@ -303,58 +268,6 @@ namespace ProjectH.UI.Scenes
         }
 
         // ── 상세 오버레이 ─────────────────────────────────────────────
-
-        private GameObject BuildDetailOverlay(Transform root)
-        {
-            var t = UITheme.Instance;
-
-            var overlay = new GameObject("DetailOverlay");
-            overlay.transform.SetParent(root, false);
-            overlay.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.92f);
-            var overlayRect = overlay.GetComponent<RectTransform>();
-            overlayRect.anchorMin = Vector2.zero;
-            overlayRect.anchorMax = Vector2.one;
-            overlayRect.offsetMin = Vector2.zero;
-            overlayRect.offsetMax = Vector2.zero;
-
-            // 닫기 버튼 (우상단)
-            var closeBtn = new GameObject("CloseBtn");
-            closeBtn.transform.SetParent(overlay.transform, false);
-            closeBtn.AddComponent<Image>().color = t.danger;
-            var closeBtnComp = closeBtn.AddComponent<Button>();
-            closeBtnComp.onClick.AddListener(() => overlay.SetActive(false));
-            var closeBtnRect = closeBtn.GetComponent<RectTransform>();
-            closeBtnRect.anchorMin = new Vector2(1f, 1f);
-            closeBtnRect.anchorMax = new Vector2(1f, 1f);
-            closeBtnRect.pivot     = new Vector2(1f, 1f);
-            closeBtnRect.sizeDelta = new Vector2(120f, 80f);
-            closeBtnRect.anchoredPosition = Vector2.zero;
-            var closeTxt = new GameObject("Text");
-            closeTxt.transform.SetParent(closeBtn.transform, false);
-            var closeTxtComp = closeTxt.AddComponent<Text>();
-            closeTxtComp.text = "닫기";
-            closeTxtComp.font = t.GetFont();
-            closeTxtComp.fontSize = t.fontSizeBody;
-            closeTxtComp.alignment = TextAnchor.MiddleCenter;
-            closeTxtComp.color = t.textPrimary;
-            var closeTxtRect = closeTxt.GetComponent<RectTransform>();
-            closeTxtRect.anchorMin = Vector2.zero;
-            closeTxtRect.anchorMax = Vector2.one;
-            closeTxtRect.offsetMin = Vector2.zero;
-            closeTxtRect.offsetMax = Vector2.zero;
-
-            // 스크롤 콘텐츠
-            var contentArea = new GameObject("ContentArea");
-            contentArea.transform.SetParent(overlay.transform, false);
-            var contentRect = contentArea.AddComponent<RectTransform>();
-            contentRect.anchorMin = Vector2.zero;
-            contentRect.anchorMax = Vector2.one;
-            contentRect.offsetMin = Vector2.zero;
-            contentRect.offsetMax = new Vector2(-120f, -80f); // 닫기 버튼 피하기
-
-            detailScrollRoot = UIFactory.CreateScrollList(contentArea.transform, spacing: 8f);
-            return overlay;
-        }
 
         private void OpenDetailOverlay(string mercenaryId)
         {
@@ -376,39 +289,38 @@ namespace ProjectH.UI.Scenes
             tables.TryGetCharacterRow(record.templateId, out var charRow);
             var name = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
 
-            // 이름 / 등급 / 레벨
             var expToNext = tables.GetExpToNextLevel(record.level);
-            UIFactory.CreateActionItem(detailScrollRoot,
-                $"{name}  G{charRow.Grade}  Lv.{record.level}\nEXP {record.exp} / {expToNext}",
-                110f, UITheme.Instance.surface);
+            Instantiate(actionCardPrefab, detailScrollRoot)
+                .Set($"{name}  G{charRow.Grade}  Lv.{record.level}\nEXP {record.exp} / {expToNext}",
+                    UITheme.Instance.surface, null, 110f);
 
-            // 재능
             var talentName = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
             var talentDesc = talents != null ? talents.GetTalentDescription(record.talentTag) : string.Empty;
-            UIFactory.CreateActionItem(detailScrollRoot,
-                $"재능: {talentName}\n{talentDesc}",
-                100f, UITheme.Instance.surfaceRaised);
+            Instantiate(actionCardPrefab, detailScrollRoot)
+                .Set($"재능: {talentName}\n{talentDesc}", UITheme.Instance.surfaceRaised, null, 100f);
 
-            // 스탯
             if (tables.TryGetCombatUnit(record.templateId, out var unitRow))
             {
-                UIFactory.CreateActionItem(detailScrollRoot,
-                    $"HP {unitRow.MaxHp}  MP {unitRow.MaxMana}\n" +
-                    $"ATK {unitRow.Attack}  DEF {unitRow.Defense}  AGI {unitRow.Agility}\n" +
-                    $"{unitRow.DamageType} / {unitRow.AttackRangeType}",
-                    120f, UITheme.Instance.surfaceRaised);
+                Instantiate(actionCardPrefab, detailScrollRoot)
+                    .Set($"HP {unitRow.MaxHp}  MP {unitRow.MaxMana}\n" +
+                         $"ATK {unitRow.Attack}  DEF {unitRow.Defense}  AGI {unitRow.Agility}\n" +
+                         $"{unitRow.DamageType} / {unitRow.AttackRangeType}",
+                        UITheme.Instance.surfaceRaised, null, 120f);
             }
 
-            // ── 장비 슬롯 ──────────────────────────────────────────
-            UIFactory.CreateActionItem(detailScrollRoot, "── 장비 ──", 50f, UITheme.Instance.surfaceBorder);
+            Instantiate(actionCardPrefab, detailScrollRoot)
+                .Set("── 장비 ──", UITheme.Instance.surfaceBorder, null, 50f);
             BuildEquipSection(record, "weapon",    "무기");
             BuildEquipSection(record, "armor",     "방어구");
             BuildEquipSection(record, "accessory", "장신구");
             BuildEquipSection(record, "extra",     "특수");
 
-            // ── 승급 ───────────────────────────────────────────────
-            UIFactory.CreateActionItem(detailScrollRoot, "── 승급 ──", 50f, UITheme.Instance.surfaceBorder);
+            Instantiate(actionCardPrefab, detailScrollRoot)
+                .Set("── 승급 ──", UITheme.Instance.surfaceBorder, null, 50f);
             BuildPromotionSection(record, charRow, tables);
+
+            if (detailScrollRoot is RectTransform rt)
+                LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
         }
 
         private void BuildEquipSection(PlayerAccountService.MercenaryRecord record,
@@ -419,26 +331,33 @@ namespace ProjectH.UI.Scenes
             if (!string.IsNullOrWhiteSpace(equippedId) &&
                 InventoryService.TryGetEquipment(equippedId, out var equipped))
             {
-                UIFactory.CreateActionItem(detailScrollRoot,
-                    $"{label}: {FormatEquipLabel(equipped)}  [해제]",
-                    80f, UITheme.Instance.danger,
-                    () => { InventoryService.TryUnequip(equipped.equipmentId, out _); PopulateDetailOverlay(record.mercenaryId); });
+                Instantiate(actionCardPrefab, detailScrollRoot)
+                    .Set($"{label}: {FormatEquipLabel(equipped)}  [해제]",
+                        UITheme.Instance.danger,
+                        () =>
+                        {
+                            InventoryService.TryUnequip(equipped.equipmentId, out _);
+                            PopulateDetailOverlay(record.mercenaryId);
+                        }, 80f);
             }
             else
             {
-                UIFactory.CreateActionItem(detailScrollRoot,
-                    $"{label}: (빈 슬롯)", 72f, UITheme.Instance.surface);
+                Instantiate(actionCardPrefab, detailScrollRoot)
+                    .Set($"{label}: (빈 슬롯)", UITheme.Instance.surface, null, 72f);
             }
 
             foreach (var eq in InventoryService.GetUnequippedEquipments(equipType).Take(3))
             {
-                var tint = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.45f);
-                var eqId = eq.equipmentId;
+                var tint  = Color.Lerp(UITheme.Instance.surface, UIFactory.GradeColor(eq.grade), 0.45f);
+                var eqId  = eq.equipmentId;
                 var mercId = record.mercenaryId;
-                UIFactory.CreateActionItem(detailScrollRoot,
-                    $"장착: {FormatEquipLabel(eq)}",
-                    80f, tint,
-                    () => { InventoryService.TryEquip(eqId, mercId, out _); PopulateDetailOverlay(mercId); });
+                Instantiate(actionCardPrefab, detailScrollRoot)
+                    .Set($"장착: {FormatEquipLabel(eq)}", tint,
+                        () =>
+                        {
+                            InventoryService.TryEquip(eqId, mercId, out _);
+                            PopulateDetailOverlay(mercId);
+                        }, 80f);
             }
         }
 
@@ -450,17 +369,20 @@ namespace ProjectH.UI.Scenes
                 var remaining = PlayerAccountService.GetPromotionRemainingSeconds(record.mercenaryId);
                 if (remaining > 0)
                 {
-                    UIFactory.CreateActionItem(detailScrollRoot,
-                        $"승급 진행중: {remaining / 60:D2}:{remaining % 60:D2}", 72f, UITheme.Instance.warning);
+                    Instantiate(actionCardPrefab, detailScrollRoot)
+                        .Set($"승급 진행중: {remaining / 60:D2}:{remaining % 60:D2}",
+                            UITheme.Instance.warning, null, 72f);
                 }
                 else
                 {
-                    UIFactory.CreateActionItem(detailScrollRoot, "승급 완료 — 수령하기", 80f,
-                        UITheme.Instance.success,
-                        () => { PlayerAccountService.TryCompletePromotion(record.mercenaryId, out _);
-                                PopulateDetailOverlay(record.mercenaryId); });
+                    Instantiate(actionCardPrefab, detailScrollRoot)
+                        .Set("승급 완료 — 수령하기", UITheme.Instance.success,
+                            () =>
+                            {
+                                PlayerAccountService.TryCompletePromotion(record.mercenaryId, out _);
+                                PopulateDetailOverlay(record.mercenaryId);
+                            }, 80f);
                 }
-
                 return;
             }
 
@@ -470,7 +392,8 @@ namespace ProjectH.UI.Scenes
             if (string.IsNullOrEmpty(charRow.PromotionRouteA) &&
                 string.IsNullOrEmpty(charRow.PromotionRouteB))
             {
-                UIFactory.CreateActionItem(detailScrollRoot, "(승급 루트 없음)", 60f, UITheme.Instance.muted);
+                Instantiate(actionCardPrefab, detailScrollRoot)
+                    .Set("(승급 루트 없음)", UITheme.Instance.muted, null, 60f);
             }
         }
 
@@ -490,14 +413,15 @@ namespace ProjectH.UI.Scenes
                         $"{rule.TimeSeconds / 60:D2}:{rule.TimeSeconds % 60:D2}" +
                         (!canLevel ? "  [레벨 부족]" : "") +
                         (!canAfford ? "  [크레딧 부족]" : "");
-            var color = canPromote ? UITheme.Instance.primary : UITheme.Instance.muted;
+            var color  = canPromote ? UITheme.Instance.primary : UITheme.Instance.muted;
             var mercId = record.mercenaryId;
-            UIFactory.CreateActionItem(detailScrollRoot, label, 100f, color,
-                canPromote ? (Action)(() =>
-                {
-                    PlayerAccountService.StartPromotion(mercId, targetId, rule.TimeSeconds, rule.CostCredits);
-                    PopulateDetailOverlay(mercId);
-                }) : null);
+            Instantiate(actionCardPrefab, detailScrollRoot)
+                .Set(label, color,
+                    canPromote ? (Action)(() =>
+                    {
+                        PlayerAccountService.StartPromotion(mercId, targetId, rule.TimeSeconds, rule.CostCredits);
+                        PopulateDetailOverlay(mercId);
+                    }) : null, 100f);
         }
 
         // ── 이벤트 핸들러 ────────────────────────────────────────────

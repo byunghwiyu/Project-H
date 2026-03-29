@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 namespace ProjectH.UI
@@ -68,22 +69,23 @@ namespace ProjectH.UI
         public int fontSizeLabel   = 16;
 
         // ── Font ──────────────────────────────────────────────────────
-        // Set a Resources path (e.g. "Fonts/NotoSansKR") to override the built-in font.
+        // TMP 폰트 에셋 (Font Asset Creator로 생성한 SDF 에셋 지정)
+        [SerializeField] private TMP_FontAsset tmpFont;
+
+        // Legacy Text용 (BattleHUD 등 아직 전환 안 된 곳)
         public string fontResourcePath = string.Empty;
 
         // ─────────────────────────────────────────────────────────────
+
+        public TMP_FontAsset GetTMPFont() => tmpFont;
 
         public Font GetFont()
         {
             if (!string.IsNullOrWhiteSpace(fontResourcePath))
             {
                 var custom = Resources.Load<Font>(fontResourcePath);
-                if (custom != null)
-                {
-                    return custom;
-                }
+                if (custom != null) return custom;
             }
-
             return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         }
 
