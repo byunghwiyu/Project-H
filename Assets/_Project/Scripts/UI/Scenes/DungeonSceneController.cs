@@ -371,7 +371,7 @@ namespace ProjectH.UI.Scenes
                 tables.TryGetCharacterRow(record.templateId, out var charRow);
                 var name   = string.IsNullOrWhiteSpace(charRow.Name) ? record.templateId : charRow.Name;
                 var talent = talents != null ? talents.GetTalentName(record.talentTag) : record.talentTag;
-                var label  = $"#{i + 1}  {name}  Lv.{record.level}\n{talent}";
+                var label  = $"No.{i + 1}  {name}  Lv.{record.level}\n{talent}";
 
                 if (dispatched)
                 {
